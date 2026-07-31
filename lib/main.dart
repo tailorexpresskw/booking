@@ -483,6 +483,7 @@ Widget nav(BuildContext context, String label, String path) {
 class BookingPage extends StatefulWidget {
   const BookingPage({super.key, required this.state});
   final AppState state;
+
   @override
   State<BookingPage> createState() => _BookingPageState();
 }
@@ -519,44 +520,136 @@ class _BookingPageState extends State<BookingPage> {
       public: true,
       title: s.t('Public booking for all Kuwait areas with private staff portals behind separate links.', 'حجز عام لكل مناطق الكويت مع بوابات موظفين خاصة على روابط مستقلة.'),
       subtitle: s.t('Customers only see booking and tracking. Admin, employee, tailor and driver dashboards require different links and role credentials.', 'العميل يرى الحجز والتتبع فقط. أما الإدارة والموظف والخياط والسائق فلهم روابط مختلفة وبيانات دخول مستقلة.'),
-      body: Wrap(spacing: 18, runSpacing: 18, children: [
-        SizedBox(width: 760, child: Card(child: Padding(padding: const EdgeInsets.all(22), child: Form(key: form, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(s.t('Book a home visit', 'احجز زيارة منزلية'), style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 14),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            field(name, s.t('Customer name', 'اسم العميل')),
-            field(mobile, s.t('Mobile number', 'رقم الهاتف'), phone: true),
-            SizedBox(width: 230, child: DropdownButtonFormField<Area>(value: area, menuMaxHeight: 380, decoration: InputDecoration(labelText: s.t('Area', 'المنطقة')), items: [for (final item in kuwaitAreas) DropdownMenuItem(value: item, child: Text(item.name(s.isArabic)))], onChanged: (v) => setState(() => area = v!))),
-            field(block, s.t('Block', 'قطعة'), small: true),
-            field(street, s.t('Street', 'شارع'), small: true),
-            field(building, s.t('Building / House', 'مبنى / منزل'), small: true),
-            drop(s, s.t('Service', 'الخدمة'), service, ['Alterations', 'Tailoring', 'Occasion fitting', 'Urgent repair'], (v) => setState(() => service = v!)),
-            drop(s, s.t('Tailor preference', 'تفضيل الخياط'), preference, ['Women tailor', 'Men tailor', 'No preference'], (v) => setState(() => preference = v!)),
-            drop(s, s.t('Visit window', 'موعد الزيارة'), window, ['12:00 PM - 1:00 PM', '2:00 PM - 3:00 PM', '4:00 PM - 5:00 PM', '5:00 PM - 6:00 PM', '7:00 PM - 8:00 PM'], (v) => setState(() => window = v!)),
-          ]),
-          const SizedBox(height: 12),
-          TextFormField(controller: notes, maxLines: 4, decoration: InputDecoration(labelText: s.t('Notes', 'ملاحظات'))),
-          const SizedBox(height: 16),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            ElevatedButton(onPressed: submit, child: Text(s.t('Review policy & pay', 'راجع السياسة وانتقل للدفع'))),
-            OutlinedButton(onPressed: () => showPolicyPreview(), child: Text(s.t('Preview policies', 'عرض السياسات'))),
-            OutlinedButton(onPressed: () => Navigator.of(context).pushReplacementNamed('/track'), child: Text(s.t('Open tracking', 'افتح التتبع'))),
-          ]),
-        ]))))),
-        SizedBox(width: 430, child: Card(child: Padding(padding: const EdgeInsets.all(22), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(s.t('What happens before payment', 'ما الذي يحدث قبل الدفع'), style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          bullet(s.t('Policies are shown before payment and must be accepted.', 'يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.')) ,
-          bullet(s.t('The customer moves to payment only after agreeing.', 'ينتقل العميل إلى الدفع فقط بعد الموافقة.')) ,
-          bullet(s.t('Admin policy text is reused here automatically.', 'يتم استخدام نص سياسات الإدارة هنا تلقائياً.')) ,
-          for (final policy in adminPolicies) bullet(s.isArabic ? policy.nameAr : policy.nameEn),
-        ])))),
-      ]),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 980;
+          final formCardWidth = narrow ? constraints.maxWidth : 760.0;
+          final infoCardWidth = narrow ? constraints.maxWidth : 430.0;
+          return Wrap(
+            spacing: 18,
+            runSpacing: 18,
+            children: [
+              SizedBox(
+                width: formCardWidth,
+                child: bookingFormCard(formCardWidth),
+              ),
+              SizedBox(
+                width: infoCardWidth,
+                child: bookingInfoCard(),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
-  Widget field(TextEditingController c, String label, {bool phone = false, bool small = false}) => SizedBox(
-    width: small ? 150 : 230,
+  Widget bookingFormCard(double cardWidth) {
+    final s = widget.state;
+    final contentWidth = cardWidth - 44;
+    final phone = cardWidth < 520;
+    final wideField = phone ? contentWidth : 230.0;
+    final halfField = phone ? (contentWidth - 12) / 2 : 150.0;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Form(
+          key: form,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                s.t('Book a home visit', 'احجز زيارة منزلية'),
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  field(name, s.t('Customer name', 'اسم العميل'), width: wideField),
+                  field(mobile, s.t('Mobile number', 'رقم الهاتف'), width: wideField, phone: true),
+                  SizedBox(
+                    width: wideField,
+                    child: DropdownButtonFormField<Area>(
+                      value: area,
+                      menuMaxHeight: 380,
+                      decoration: InputDecoration(labelText: s.t('Area', 'المنطقة')),
+                      items: [
+                        for (final item in kuwaitAreas)
+                          DropdownMenuItem(value: item, child: Text(item.name(s.isArabic))),
+                      ],
+                      onChanged: (v) => setState(() => area = v!),
+                    ),
+                  ),
+                  field(block, s.t('Block', 'قطعة'), width: halfField),
+                  field(street, s.t('Street', 'شارع'), width: halfField),
+                  field(building, s.t('Building / House', 'مبنى / منزل'), width: wideField),
+                  drop(s, s.t('Service', 'الخدمة'), service, ['Alterations', 'Tailoring', 'Occasion fitting', 'Urgent repair'], (v) => setState(() => service = v!), width: wideField),
+                  drop(s, s.t('Tailor preference', 'تفضيل الخياط'), preference, ['Women tailor', 'Men tailor', 'No preference'], (v) => setState(() => preference = v!), width: wideField),
+                  drop(s, s.t('Visit window', 'موعد الزيارة'), window, ['12:00 PM - 1:00 PM', '2:00 PM - 3:00 PM', '4:00 PM - 5:00 PM', '5:00 PM - 6:00 PM', '7:00 PM - 8:00 PM'], (v) => setState(() => window = v!), width: wideField),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextFormField(controller: notes, maxLines: 4, decoration: InputDecoration(labelText: s.t('Notes', 'ملاحظات'))),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  ElevatedButton(onPressed: submit, child: Text(s.t('Review policy & pay', 'راجع السياسة وانتقل للدفع'))),
+                  OutlinedButton(onPressed: () => showPolicyPreview(), child: Text(s.t('Preview policies', 'عرض السياسات'))),
+                  OutlinedButton(onPressed: () => Navigator.of(context).pushReplacementNamed('/track'), child: Text(s.t('Open tracking', 'افتح التتبع'))),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget bookingInfoCard() {
+    final s = widget.state;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              s.t('What happens before payment', 'ما الذي يحدث قبل الدفع'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            bullet(s.t('Policies are shown before payment and must be accepted.', 'يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.')),
+            bullet(s.t('The customer moves to payment only after agreeing.', 'ينتقل العميل إلى الدفع فقط بعد الموافقة.')),
+            bullet(s.t('Admin policy text is reused here automatically.', 'يتم استخدام نص سياسات الإدارة هنا تلقائياً.')),
+            const SizedBox(height: 10),
+            for (final policy in adminPolicies)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFCF7),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE6D9BE)),
+                ),
+                child: Text(
+                  s.isArabic ? policy.nameAr : policy.nameEn,
+                  style: const TextStyle(fontWeight: FontWeight.w700, color: ink),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget field(TextEditingController c, String label, {required double width, bool phone = false}) => SizedBox(
+    width: width,
     child: TextFormField(
       controller: c,
       keyboardType: phone ? TextInputType.phone : TextInputType.text,
@@ -565,9 +658,14 @@ class _BookingPageState extends State<BookingPage> {
     ),
   );
 
-  Widget drop(AppState s, String label, String value, List<String> items, ValueChanged<String?> onChanged) => SizedBox(
-    width: 230,
-    child: DropdownButtonFormField<String>(value: value, decoration: InputDecoration(labelText: label), items: [for (final item in items) DropdownMenuItem(value: item, child: Text(item))], onChanged: onChanged),
+  Widget drop(AppState s, String label, String value, List<String> items, ValueChanged<String?> onChanged, {required double width}) => SizedBox(
+    width: width,
+    child: DropdownButtonFormField<String>(
+      value: value,
+      decoration: InputDecoration(labelText: label),
+      items: [for (final item in items) DropdownMenuItem(value: item, child: Text(item))],
+      onChanged: onChanged,
+    ),
   );
 
   void submit() {
@@ -577,12 +675,13 @@ class _BookingPageState extends State<BookingPage> {
 
   Future<void> showPolicyPreview() async {
     final s = widget.state;
+    final dialogWidth = dialogContentWidth(context, 860);
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(s.t('Policies before payment', 'السياسات قبل الدفع')),
         content: SizedBox(
-          width: 860,
+          width: dialogWidth,
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -595,10 +694,7 @@ class _BookingPageState extends State<BookingPage> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(s.t('Close', 'إغلاق')),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(s.t('Close', 'إغلاق'))),
         ],
       ),
     );
@@ -607,13 +703,14 @@ class _BookingPageState extends State<BookingPage> {
   Future<void> showPolicyGate() async {
     final s = widget.state;
     var agreed = false;
+    final dialogWidth = dialogContentWidth(context, 860);
     final proceed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text(s.t('Review policy before payment', 'راجع السياسة قبل الدفع')),
           content: SizedBox(
-            width: 860,
+            width: dialogWidth,
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -633,14 +730,8 @@ class _BookingPageState extends State<BookingPage> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(s.t('Back', 'رجوع')),
-            ),
-            ElevatedButton(
-              onPressed: agreed ? () => Navigator.of(context).pop(true) : null,
-              child: Text(s.t('Proceed to payment', 'الانتقال إلى الدفع')),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(s.t('Back', 'رجوع'))),
+            ElevatedButton(onPressed: agreed ? () => Navigator.of(context).pop(true) : null, child: Text(s.t('Proceed to payment', 'الانتقال إلى الدفع'))),
           ],
         ),
       ),
@@ -654,65 +745,45 @@ class _BookingPageState extends State<BookingPage> {
   Future<void> showPaymentGate() async {
     final s = widget.state;
     var method = 'KNET';
+    final dialogWidth = dialogContentWidth(context, 540);
     final paid = await showDialog<String>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text(s.t('Payment', 'الدفع')),
           content: SizedBox(
-            width: 540,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s.t('Choose a payment method after agreeing to the policies.', 'اختر طريقة الدفع بعد الموافقة على السياسات.')),
-                const SizedBox(height: 14),
-                RadioListTile<String>(
-                  value: 'KNET',
-                  groupValue: method,
-                  onChanged: (value) => setDialogState(() => method = value ?? 'KNET'),
-                  title: const Text('KNET'),
-                ),
-                RadioListTile<String>(
-                  value: 'Visa / MasterCard',
-                  groupValue: method,
-                  onChanged: (value) => setDialogState(() => method = value ?? 'KNET'),
-                  title: const Text('Visa / MasterCard'),
-                ),
-                RadioListTile<String>(
-                  value: s.t('Cash on pickup', 'نقداً عند الاستلام'),
-                  groupValue: method,
-                  onChanged: (value) => setDialogState(() => method = value ?? 'KNET'),
-                  title: Text(s.t('Cash on pickup', 'نقداً عند الاستلام')),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF7E7),
-                    borderRadius: BorderRadius.circular(14),
+            width: dialogWidth,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.t('Choose a payment method after agreeing to the policies.', 'اختر طريقة الدفع بعد الموافقة على السياسات.')),
+                  const SizedBox(height: 14),
+                  RadioListTile<String>(value: 'KNET', groupValue: method, onChanged: (value) => setDialogState(() => method = value ?? 'KNET'), title: const Text('KNET')),
+                  RadioListTile<String>(value: 'Visa / MasterCard', groupValue: method, onChanged: (value) => setDialogState(() => method = value ?? 'KNET'), title: const Text('Visa / MasterCard')),
+                  RadioListTile<String>(value: s.t('Cash on pickup', 'نقداً عند الاستلام'), groupValue: method, onChanged: (value) => setDialogState(() => method = value ?? 'KNET'), title: Text(s.t('Cash on pickup', 'نقداً عند الاستلام'))),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(color: const Color(0xFFFFF7E7), borderRadius: BorderRadius.circular(14)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(s.t('Home service visit', 'زيارة الخدمة المنزلية'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 6),
+                        Text(s.t('Demo amount: KD 3.500', 'المبلغ التجريبي: 3.500 د.ك')),
+                      ],
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(s.t('Home service visit', 'زيارة الخدمة المنزلية'), style: const TextStyle(fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 6),
-                      Text(s.t('Demo amount: KD 3.500', 'المبلغ التجريبي: 3.500 د.ك')),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text(s.t('Back', 'رجوع')),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(method),
-              child: Text(s.t('Pay now', 'ادفع الآن')),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(s.t('Back', 'رجوع'))),
+            ElevatedButton(onPressed: () => Navigator.of(context).pop(method), child: Text(s.t('Pay now', 'ادفع الآن'))),
           ],
         ),
       ),
@@ -735,9 +806,7 @@ class _BookingPageState extends State<BookingPage> {
       notes: mergedNotes,
     );
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(s.t('Payment completed. Booking created.', 'تم الدفع وإنشاء الحجز.'))),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.t('Payment completed. Booking created.', 'تم الدفع وإنشاء الحجز.'))));
     Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
   }
 
@@ -747,29 +816,34 @@ class _BookingPageState extends State<BookingPage> {
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFFCF7),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE6D9BE)),
-      ),
+      decoration: BoxDecoration(color: const Color(0xFFFFFCF7), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE6D9BE))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            s.isArabic ? policy.nameAr : policy.nameEn,
-            style: const TextStyle(color: ink, fontWeight: FontWeight.w700),
-          ),
+          Text(s.isArabic ? policy.nameAr : policy.nameEn, style: const TextStyle(color: ink, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Text(s.isArabic ? policy.detailAr : policy.detailEn),
         ],
       ),
     );
   }
+
+  double dialogContentWidth(BuildContext context, double desktopWidth) {
+    final width = MediaQuery.of(context).size.width;
+    if (width < 520) {
+      return width * 0.82;
+    }
+    if (width < desktopWidth + 120) {
+      return width * 0.78;
+    }
+    return desktopWidth;
+  }
 }
 class TrackPage extends StatefulWidget {
   const TrackPage({super.key, required this.state, this.initialId});
   final AppState state;
   final String? initialId;
+
   @override
   State<TrackPage> createState() => _TrackPageState();
 }
@@ -798,42 +872,103 @@ class _TrackPageState extends State<TrackPage> {
       public: true,
       title: s.t('Customer-safe tracking page for pickup, tailoring and delivery status.', 'صفحة تتبع آمنة للعميل لحالة الاستلام والخياطة والتوصيل.'),
       subtitle: s.t('Drivers can share this route with customers. The customer still cannot see internal dashboards.', 'يمكن للسائق مشاركة هذا الرابط مع العميل، لكن العميل لا يمكنه رؤية اللوحات الداخلية.'),
-      body: Wrap(spacing: 18, runSpacing: 18, children: [
-        SizedBox(width: 360, child: Card(child: Padding(padding: const EdgeInsets.all(22), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(s.t('Track order', 'تتبع الطلب'), style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          TextField(controller: id, decoration: InputDecoration(labelText: s.t('Order ID', 'رقم الطلب'))),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: search, child: Text(s.t('Search', 'بحث'))),
-          const SizedBox(height: 12),
-          Wrap(spacing: 8, children: [for (final item in widget.state.orders.take(4)) ActionChip(label: Text(item.id), onPressed: () { id.text = item.id; search(); })]),
-        ])))),
-        SizedBox(width: 820, child: Card(child: Padding(padding: const EdgeInsets.all(22), child: order == null ? Text(s.t('Search an order to show status, map links and assigned team.', 'ابحث عن طلب لإظهار الحالة وروابط الخريطة والفريق المخصص.')) : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            Text('${s.t('Order', 'الطلب')} ${order!.id}', style: Theme.of(context).textTheme.headlineSmall),
-            badge(stageLabel(order!.stage, s.isArabic), stageColor(order!.stage)),
-          ]),
-          const SizedBox(height: 12),
-          Text('${order!.customer} • ${order!.mobile}'),
-          const SizedBox(height: 10),
-          bullet('${s.t('Area', 'المنطقة')}: ${order!.area(s.isArabic)}'),
-          bullet('${s.t('Address', 'العنوان')}: ${order!.address}'),
-          bullet('${s.t('Service', 'الخدمة')}: ${order!.service}'),
-          bullet('${s.t('Tailor', 'الخياط')}: ${order!.tailor}'),
-          bullet('${s.t('Driver', 'السائق')}: ${order!.driver}'),
-          bullet('${s.t('Visit window', 'موعد الزيارة')}: ${order!.window}'),
-          const SizedBox(height: 12),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            ElevatedButton(onPressed: () => openMap(order!, true), child: const Text('Google Maps')),
-            OutlinedButton(onPressed: () => openMap(order!, false), child: const Text('OpenStreetMap')),
-            OutlinedButton(onPressed: () => copy(buildTrackingLink(order!.id), s.t('Tracking link copied.', 'تم نسخ رابط التتبع.')), child: Text(s.t('Copy tracking link', 'نسخ رابط التتبع'))),
-          ]),
-          const SizedBox(height: 18),
-          Text(s.t('Timeline', 'خط سير الطلب'), style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 10),
-          for (final step in order!.timeline) bullet(step),
-        ])))),
-      ]),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 980;
+          final leftWidth = narrow ? constraints.maxWidth : 360.0;
+          final rightWidth = narrow ? constraints.maxWidth : 820.0;
+          return Wrap(
+            spacing: 18,
+            runSpacing: 18,
+            children: [
+              SizedBox(width: leftWidth, child: trackSearchCard()),
+              SizedBox(width: rightWidth, child: trackingResultCard()),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget trackSearchCard() {
+    final s = widget.state;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(s.t('Track order', 'تتبع الطلب'), style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(controller: id, decoration: InputDecoration(labelText: s.t('Order ID', 'رقم الطلب'))),
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: ElevatedButton(onPressed: search, child: Text(s.t('Search', 'بحث')))),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final item in widget.state.orders.take(4))
+                  ActionChip(
+                    label: Text(item.id),
+                    onPressed: () {
+                      id.text = item.id;
+                      search();
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget trackingResultCard() {
+    final s = widget.state;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: order == null
+            ? Text(s.t('Search an order to show status, map links and assigned team.', 'ابحث عن طلب لإظهار الحالة وروابط الخريطة والفريق المخصص.'))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text('${s.t('Order', 'الطلب')} ${order!.id}', style: Theme.of(context).textTheme.headlineSmall),
+                      badge(stageLabel(order!.stage, s.isArabic), stageColor(order!.stage)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text('${order!.customer} • ${order!.mobile}'),
+                  const SizedBox(height: 10),
+                  bullet('${s.t('Area', 'المنطقة')}: ${order!.area(s.isArabic)}'),
+                  bullet('${s.t('Address', 'العنوان')}: ${order!.address}'),
+                  bullet('${s.t('Service', 'الخدمة')}: ${order!.service}'),
+                  bullet('${s.t('Tailor', 'الخياط')}: ${order!.tailor}'),
+                  bullet('${s.t('Driver', 'السائق')}: ${order!.driver}'),
+                  bullet('${s.t('Visit window', 'موعد الزيارة')}: ${order!.window}'),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      ElevatedButton(onPressed: () => openMap(order!, true), child: const Text('Google Maps')),
+                      OutlinedButton(onPressed: () => openMap(order!, false), child: const Text('OpenStreetMap')),
+                      OutlinedButton(onPressed: () => copy(buildTrackingLink(order!.id), s.t('Tracking link copied.', 'تم نسخ رابط التتبع.')), child: Text(s.t('Copy tracking link', 'نسخ رابط التتبع'))),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Text(s.t('Timeline', 'خط سير الطلب'), style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 10),
+                  for (final step in order!.timeline) bullet(step),
+                ],
+              ),
+      ),
     );
   }
 
@@ -846,11 +981,12 @@ class _TrackPageState extends State<TrackPage> {
   }
 
   Future<void> openMap(Order order, bool google) async {
-    final url = google ? 'https://www.google.com/maps/search/?api=1&query=${order.lat},${order.lng}' : 'https://www.openstreetmap.org/?mlat=${order.lat}&mlon=${order.lng}#map=16/${order.lat}/${order.lng}';
+    final url = google
+        ? 'https://www.google.com/maps/search/?api=1&query=${order.lat},${order.lng}'
+        : 'https://www.openstreetmap.org/?mlat=${order.lat}&mlon=${order.lng}#map=16/${order.lat}/${order.lng}';
     await launchUrl(Uri.parse(url), webOnlyWindowName: '_blank');
   }
 }
-
 class StaffHubPage extends StatelessWidget {
   const StaffHubPage({super.key, required this.state});
   final AppState state;

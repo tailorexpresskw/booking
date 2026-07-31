@@ -7,3 +7,6 @@
 build/
 pubspec.lock
 
+.github_deploy_key*
+booking_deploy_key*
+generate_deploy_key.cmd
