@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: tailor-express-booking
+    runtime: docker
+    plan: free
+    repo: https://github.com/tailorexpresskw/booking
+    branch: main
+    dockerfilePath: ./Dockerfile
+    autoDeployTrigger: commit
+    envVars:
+      - key: PORT
+        value: 10000

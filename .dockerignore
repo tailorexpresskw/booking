@@ -1,0 +1,7 @@
+.git
+.dart_tool
+build
+.idea
+.github_deploy_key*
+booking_deploy_key*
+generate_deploy_key.cmd
