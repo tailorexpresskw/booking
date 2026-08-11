@@ -2,6 +2,7 @@
 FROM ubuntu:24.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV TAR_OPTIONS=--no-same-owner
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
