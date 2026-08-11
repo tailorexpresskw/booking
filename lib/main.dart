@@ -12,9 +12,25 @@ const gold = Color(0xFFC7A04B);
 const ink = Color(0xFF17130E);
 const sand = Color(0xFFF7F1E5);
 
-enum Role { admin, employee, receptionistSupervisor, driverSupervisor, receptionist, tailor, driver }
+enum Role {
+  admin,
+  employee,
+  receptionistSupervisor,
+  driverSupervisor,
+  receptionist,
+  tailor,
+  driver
+}
 
-enum Stage { newBooking, branchAssigned, assigned, onWay, tailoring, ready, delivered }
+enum Stage {
+  newBooking,
+  branchAssigned,
+  assigned,
+  onWay,
+  tailoring,
+  ready,
+  delivered
+}
 
 const ordersStorageKey = 'tailor_express_orders_v1';
 
@@ -117,7 +133,6 @@ class Order {
   bool get hasReceptionist => !isPendingAssignment(receptionist);
   bool get hasDriver => !isPendingAssignment(driver);
 
-
   Order copyWith({
     String? branch,
     String? receptionist,
@@ -205,7 +220,6 @@ class Complaint {
   final String date;
   String type(bool isArabic) => isArabic ? typeAr : typeEn;
 }
-
 
 const staffReceptionists = <String>['Aisha', 'Fatima', 'Mona', 'Noura'];
 const staffDrivers = <String>['Omar', 'Khaled', 'Yousef', 'Nasser'];
@@ -462,8 +476,10 @@ class AppState extends ChangeNotifier {
     final ok = switch (nextRole) {
       Role.admin => name == 'admin' && pass == 'Admin123!',
       Role.employee => name == 'ops' && pass == 'Ops123!',
-      Role.receptionistSupervisor => name == 'reception-lead' && pass == 'ReceptionLead123!',
-      Role.driverSupervisor => name == 'driver-lead' && pass == 'DriverLead123!',
+      Role.receptionistSupervisor =>
+        name == 'reception-lead' && pass == 'ReceptionLead123!',
+      Role.driverSupervisor =>
+        name == 'driver-lead' && pass == 'DriverLead123!',
       Role.receptionist => name == 'reception' && pass == 'Reception123!',
       Role.tailor => name == 'afroz' && pass == 'Tailor123!',
       Role.driver => name == 'omar' && pass == 'Driver123!',
@@ -586,7 +602,6 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-
   Future<String> createPaymentLink({
     required Order order,
     required double amount,
@@ -708,7 +723,6 @@ class AppState extends ChangeNotifier {
     return local;
   }
 
-
   Future<void> updateOrder(
     String id, {
     String? branch,
@@ -752,8 +766,8 @@ class AppState extends ChangeNotifier {
       );
       final status = response.status ?? 0;
       if (status >= 200 && status < 300 && response.responseText != null) {
-        orders[index] = Order.fromJson(
-            Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map));
+        orders[index] = Order.fromJson(Map<String, dynamic>.from(
+            jsonDecode(response.responseText!) as Map));
         _saveOrders();
         notifyListeners();
         return;
@@ -993,6 +1007,14 @@ class _BookingPageState extends State<BookingPage> {
   Area area = kuwaitAreas.first;
   String service = 'Tailoring';
   String preference = 'Women tailor';
+
+  List<String> get serviceOptions => widget.state.isArabic
+      ? const ['تصليح', 'تصليح سريع', 'تفصال']
+      : const ['Repair', 'Urgent repair', 'Tailoring'];
+
+  List<String> get preferenceOptions => widget.state.isArabic
+      ? const ['خياط', 'خياطه']
+      : const ['Men tailor', 'Women tailor'];
   String window = '5:00 PM - 6:00 PM';
 
   @override
@@ -1074,19 +1096,19 @@ class _BookingPageState extends State<BookingPage> {
                   drop(
                       s,
                       s.t('Service', 'الخدمة'),
-                      service,
-                      [
-                        'Tailoring',
-                        'Repair',
-                        'Urgent repair'
-                      ],
+                      serviceOptions.contains(service)
+                          ? service
+                          : serviceOptions.first,
+                      serviceOptions,
                       (v) => setState(() => service = v!),
                       width: wideField),
                   drop(
                       s,
                       s.t('Tailor preference', 'تفضيل الخياط'),
-                      preference,
-                      ['Women tailor', 'Men tailor', 'No preference'],
+                      preferenceOptions.contains(preference)
+                          ? preference
+                          : preferenceOptions.first,
+                      preferenceOptions,
                       (v) => setState(() => preference = v!),
                       width: wideField),
                   drop(
@@ -1422,8 +1444,7 @@ class _BookingPageState extends State<BookingPage> {
                             style:
                                 const TextStyle(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 6),
-                        Text(s.t('Amount: KD 3.500',
-                            'المبلغ: 3.500 د.ك')),
+                        Text(s.t('Amount: KD 3.500', 'المبلغ: 3.500 د.ك')),
                       ],
                     ),
                   ),
@@ -1485,8 +1506,8 @@ class _BookingPageState extends State<BookingPage> {
                 'تم إنشاء الحجز، لكن واجهة الدفع غير مفعلة بعد.'))));
       }
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(s.t('Booking created.', 'تم إنشاء الحجز.'))));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.t('Booking created.', 'تم إنشاء الحجز.'))));
     }
     Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
   }
@@ -1730,8 +1751,10 @@ class StaffHubPage extends StatelessWidget {
       body: Wrap(spacing: 16, runSpacing: 16, children: [
         loginCard(context, Role.admin, 'admin / Admin123!'),
         loginCard(context, Role.employee, 'ops / Ops123!'),
-        loginCard(context, Role.receptionistSupervisor, 'reception-lead / ReceptionLead123!'),
-        loginCard(context, Role.driverSupervisor, 'driver-lead / DriverLead123!'),
+        loginCard(context, Role.receptionistSupervisor,
+            'reception-lead / ReceptionLead123!'),
+        loginCard(
+            context, Role.driverSupervisor, 'driver-lead / DriverLead123!'),
         loginCard(context, Role.receptionist, 'reception / Reception123!'),
         loginCard(context, Role.tailor, 'afroz / Tailor123!'),
         loginCard(context, Role.driver, 'omar / Driver123!'),
@@ -1967,11 +1990,9 @@ class DashboardPage extends StatelessWidget {
   }
 }
 
-
-
-
 class DriverOperationsPanel extends StatelessWidget {
-  const DriverOperationsPanel({super.key, required this.state, required this.orders});
+  const DriverOperationsPanel(
+      {super.key, required this.state, required this.orders});
   final AppState state;
   final List<Order> orders;
 
@@ -1985,7 +2006,8 @@ class DriverOperationsPanel extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           if (orders.isEmpty)
-            Text(state.t('No active driver orders.', 'لا توجد طلبات نشطة للسائق.')),
+            Text(state.t(
+                'No active driver orders.', 'لا توجد طلبات نشطة للسائق.')),
           for (final order in orders.take(8))
             workflowOrderCard(context, state, order, actions: [
               OutlinedButton.icon(
@@ -2006,7 +2028,8 @@ class DriverOperationsPanel extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: () => _selectReceptionist(context, order),
                   icon: const Icon(Icons.support_agent),
-                  label: Text(state.t('Select receptionist', 'اختيار موظف الاستقبال')),
+                  label: Text(
+                      state.t('Select receptionist', 'اختيار موظف الاستقبال')),
                 ),
               if (order.stage != Stage.onWay && order.stage != Stage.delivered)
                 ElevatedButton.icon(
@@ -2032,7 +2055,8 @@ class DriverOperationsPanel extends StatelessWidget {
     await Clipboard.setData(ClipboardData(text: buildTrackingLink(order.id)));
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(state.t('Tracking link copied.', 'تم نسخ رابط التتبع.'))));
+          content:
+              Text(state.t('Tracking link copied.', 'تم نسخ رابط التتبع.'))));
     }
   }
 
@@ -2053,16 +2077,18 @@ class DriverOperationsPanel extends StatelessWidget {
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(state.t('Receptionist saved.', 'تم حفظ موظف الاستقبال.'))));
+          content:
+              Text(state.t('Receptionist saved.', 'تم حفظ موظف الاستقبال.'))));
     }
   }
 
-  Future<void> _setStage(
-      BuildContext context, Order order, Stage stage, String timelineNote) async {
+  Future<void> _setStage(BuildContext context, Order order, Stage stage,
+      String timelineNote) async {
     await state.updateOrder(order.id, stage: stage, timelineNote: timelineNote);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(state.t('Order status updated.', 'تم تحديث حالة الطلب.'))));
+          content:
+              Text(state.t('Order status updated.', 'تم تحديث حالة الطلب.'))));
     }
   }
 }
@@ -2084,7 +2110,8 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
     final pendingBranch = state.orders
         .where((o) => o.stage != Stage.delivered && !o.hasBranch)
         .toList();
-    final active = state.orders.where((o) => o.stage != Stage.delivered).toList();
+    final active =
+        state.orders.where((o) => o.stage != Stage.delivered).toList();
     return Shell(
       state: state,
       role: role,
@@ -2095,15 +2122,18 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
           'عيّن الفرع أولاً، ثم اختر موظف الاستقبال للطلب إذا كان معروفاً.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
-          metric(state.t('New notifications', 'تنبيهات جديدة'), '${pendingBranch.length}'),
-          metric(state.t('Active orders', 'الطلبات النشطة'), '${active.length}'),
+          metric(state.t('New notifications', 'تنبيهات جديدة'),
+              '${pendingBranch.length}'),
+          metric(
+              state.t('Active orders', 'الطلبات النشطة'), '${active.length}'),
           metric(state.t('Branches', 'الفروع'), '${adminBranches.length}'),
         ]),
         const SizedBox(height: 18),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(22),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(state.t('Branch assignment queue', 'قائمة تعيين الفروع'),
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
@@ -2126,7 +2156,8 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
   }
 
   Future<void> _assignBranch(BuildContext context, Order order) async {
-    final assignment = await showReceptionAssignmentDialog(context, state, order);
+    final assignment =
+        await showReceptionAssignmentDialog(context, state, order);
     if (assignment == null) return;
     await state.updateOrder(
       order.id,
@@ -2137,7 +2168,8 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(state.t('Branch assignment saved.', 'تم حفظ تعيين الفرع.'))));
+          content: Text(
+              state.t('Branch assignment saved.', 'تم حفظ تعيين الفرع.'))));
     }
   }
 }
@@ -2166,8 +2198,10 @@ class DriverSupervisorDashboard extends StatelessWidget {
           'عيّن السائق وانقل الطلب إلى حالة تم تعيين السائق.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
-          metric(state.t('Ready for driver', 'جاهز لتعيين السائق'), '${driverQueue.length}'),
-          metric(state.t('Assigned drivers', 'السائقون المعينون'), '${assigned.length}'),
+          metric(state.t('Ready for driver', 'جاهز لتعيين السائق'),
+              '${driverQueue.length}'),
+          metric(state.t('Assigned drivers', 'السائقون المعينون'),
+              '${assigned.length}'),
           metric(state.t('Active orders', 'الطلبات النشطة'),
               '${state.orders.where((o) => o.stage != Stage.delivered).length}'),
         ]),
@@ -2175,7 +2209,8 @@ class DriverSupervisorDashboard extends StatelessWidget {
         Card(
           child: Padding(
             padding: const EdgeInsets.all(22),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(state.t('Driver assignment queue', 'قائمة تعيين السائقين'),
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
@@ -2215,13 +2250,15 @@ class DriverSupervisorDashboard extends StatelessWidget {
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(state.t('Driver assignment saved.', 'تم حفظ تعيين السائق.'))));
+          content: Text(
+              state.t('Driver assignment saved.', 'تم حفظ تعيين السائق.'))));
     }
   }
 }
 
 class ReceptionistDashboard extends StatelessWidget {
-  const ReceptionistDashboard({super.key, required this.state, required this.role});
+  const ReceptionistDashboard(
+      {super.key, required this.state, required this.role});
   final AppState state;
   final Role role;
 
@@ -2241,15 +2278,18 @@ class ReceptionistDashboard extends StatelessWidget {
           'حوّل الطلب إلى جاهز عند اكتمال العمل في الفرع.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
-          metric(state.t('Branch orders', 'طلبات الفرع'), '${branchOrders.length}'),
+          metric(state.t('Branch orders', 'طلبات الفرع'),
+              '${branchOrders.length}'),
           metric(state.t('Ready', 'جاهز'), '$ready'),
-          metric(state.t('Need action', 'تحتاج إجراء'), '${branchOrders.length - ready}'),
+          metric(state.t('Need action', 'تحتاج إجراء'),
+              '${branchOrders.length - ready}'),
         ]),
         const SizedBox(height: 18),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(22),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(state.t('Reception work queue', 'قائمة عمل الاستقبال'),
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
@@ -2280,7 +2320,8 @@ class ReceptionistDashboard extends StatelessWidget {
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(state.t('Order marked ready.', 'تم تحويل الطلب إلى جاهز.'))));
+          content: Text(
+              state.t('Order marked ready.', 'تم تحويل الطلب إلى جاهز.'))));
     }
   }
 }
@@ -2302,8 +2343,10 @@ Widget workflowOrderCard(BuildContext context, AppState state, Order order,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Text('${order.customer} • ${order.id}',
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-          badge(stageLabel(order.stage, state.isArabic), stageColor(order.stage)),
+              style:
+                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          badge(
+              stageLabel(order.stage, state.isArabic), stageColor(order.stage)),
         ],
       ),
       const SizedBox(height: 8),
@@ -2313,7 +2356,9 @@ Widget workflowOrderCard(BuildContext context, AppState state, Order order,
       const SizedBox(height: 10),
       Wrap(spacing: 8, runSpacing: 8, children: [
         Chip(label: Text('${state.t('Branch', 'الفرع')}: ${order.branch}')),
-        Chip(label: Text('${state.t('Receptionist', 'الاستقبال')}: ${order.receptionist}')),
+        Chip(
+            label: Text(
+                '${state.t('Receptionist', 'الاستقبال')}: ${order.receptionist}')),
         Chip(label: Text('${state.t('Driver', 'السائق')}: ${order.driver}')),
       ]),
       if (actions.isNotEmpty) ...[
@@ -2334,25 +2379,28 @@ Future<ReceptionAssignment?> showReceptionAssignmentDialog(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
       builder: (context, setDialogState) => AlertDialog(
-        title: Text(state.t('Assign branch and receptionist',
-            'تعيين الفرع وموظف الاستقبال')),
+        title: Text(state.t(
+            'Assign branch and receptionist', 'تعيين الفرع وموظف الاستقبال')),
         content: SizedBox(
           width: 420,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             DropdownButtonFormField<String>(
               value: branch,
-              decoration: InputDecoration(labelText: state.t('Branch', 'الفرع')),
+              decoration:
+                  InputDecoration(labelText: state.t('Branch', 'الفرع')),
               items: [
                 for (final item in adminBranches)
                   DropdownMenuItem(value: item.name, child: Text(item.name)),
               ],
-              onChanged: (value) => setDialogState(() => branch = value ?? branch),
+              onChanged: (value) =>
+                  setDialogState(() => branch = value ?? branch),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               value: receptionist,
               decoration: InputDecoration(
-                  labelText: state.t('Receptionist optional', 'موظف الاستقبال اختياري')),
+                  labelText: state.t(
+                      'Receptionist optional', 'موظف الاستقبال اختياري')),
               items: [
                 for (final item in receptionistItems)
                   DropdownMenuItem(value: item, child: Text(item)),
@@ -2399,7 +2447,8 @@ Future<String?> showStaffSelectionDialog(
             for (final item in items)
               DropdownMenuItem(value: item, child: Text(item)),
           ],
-          onChanged: (value) => setDialogState(() => selected = value ?? selected),
+          onChanged: (value) =>
+              setDialogState(() => selected = value ?? selected),
         ),
         actions: [
           TextButton(
