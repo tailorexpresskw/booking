@@ -1,0 +1,97 @@
+[
+  {
+    "id": "TE-2404",
+    "customer": "Abeer Alajmi",
+    "mobile": "55881373",
+    "areaEn": "West Abdullah Mubarak",
+    "areaAr": "West Abdullah Mubarak",
+    "address": "West Abdullah Mubarak, Block 5, Street 512, House 230",
+    "service": "Alterations",
+    "preference": "No preference",
+    "window": "30-07-2026, 6:00 PM - 7:00 PM",
+    "driver": "Pending assignment",
+    "tailor": "AFROZ",
+    "stage": "assigned",
+    "lat": 29.2857,
+    "lng": 47.889,
+    "notes": "Customer prefers a call before arrival.",
+    "timeline": [
+      "29-07-2026 09:30 AM - Booking approved",
+      "29-07-2026 11:00 AM - Tailor reserved"
+    ],
+    "branch": "Pending assignment",
+    "receptionist": "Pending assignment"
+  },
+  {
+    "id": "TE-2403",
+    "customer": "Athba Almajed",
+    "mobile": "90003313",
+    "areaEn": "Abdullah Al-Salem",
+    "areaAr": "Abdullah Al-Salem",
+    "address": "Abdullah Al-Salem, Block 3, Street 38, House 2",
+    "service": "Tailoring",
+    "preference": "Women tailor",
+    "window": "29-07-2026, 2:30 PM - 3:00 PM",
+    "driver": "Omar",
+    "tailor": "AFROZ",
+    "stage": "delivered",
+    "lat": 29.3664,
+    "lng": 47.9798,
+    "notes": "Delivery completed and received by customer.",
+    "timeline": [
+      "26-07-2026 10:40 AM - Booking approved",
+      "27-07-2026 04:15 PM - Tailoring in progress",
+      "29-07-2026 03:02 PM - Delivered to customer"
+    ],
+    "branch": "Pending assignment",
+    "receptionist": "Pending assignment"
+  },
+  {
+    "id": "TE-2402",
+    "customer": "Rana",
+    "mobile": "50904449",
+    "areaEn": "Shaab",
+    "areaAr": "Shaab",
+    "address": "Shaab, Block 1, Street 10, Villa 6",
+    "service": "Occasion fitting",
+    "preference": "Women tailor",
+    "window": "29-07-2026, 5:00 PM - 5:30 PM",
+    "driver": "Omar",
+    "tailor": "AFROZ",
+    "stage": "ready",
+    "lat": 29.3442,
+    "lng": 48.0045,
+    "notes": "Evening dress fitting before travel.",
+    "timeline": [
+      "27-07-2026 07:20 PM - Booking approved",
+      "28-07-2026 01:15 PM - Tailoring in progress",
+      "29-07-2026 03:40 PM - Ready for delivery"
+    ],
+    "branch": "Pending assignment",
+    "receptionist": "Pending assignment"
+  },
+  {
+    "id": "TE-2401",
+    "customer": "Sara Alhamad",
+    "mobile": "55868777",
+    "areaEn": "North West Sulaibikhat",
+    "areaAr": "North West Sulaibikhat",
+    "address": "North West Sulaibikhat, Block 4, Street 18, House 12",
+    "service": "Alterations",
+    "preference": "Women tailor",
+    "window": "29-07-2026, 7:30 PM - 8:00 PM",
+    "driver": "Omar",
+    "tailor": "AFROZ",
+    "stage": "onWay",
+    "lat": 29.3606,
+    "lng": 47.9275,
+    "notes": "Evening pickup and quick size check.",
+    "timeline": [
+      "28-07-2026 08:12 PM - Booking approved",
+      "29-07-2026 10:10 AM - Tailor assigned",
+      "29-07-2026 06:58 PM - Driver dispatched"
+    ],
+    "branch": "Pending assignment",
+    "receptionist": "Pending assignment"
+  }
+]

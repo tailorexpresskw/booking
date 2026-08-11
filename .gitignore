@@ -1,4 +1,4 @@
-.dart_tool/
+﻿.dart_tool/
 .idea/
 .packages
 .flutter-plugins
@@ -10,3 +10,7 @@ pubspec.lock
 .github_deploy_key*
 booking_deploy_key*
 generate_deploy_key.cmd
+.dart_home/
+__pycache__/
+*.log
+data/orders.json

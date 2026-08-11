@@ -1,4 +1,8 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:html' as html;
+
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -8,8 +12,11 @@ const gold = Color(0xFFC7A04B);
 const ink = Color(0xFF17130E);
 const sand = Color(0xFFF7F1E5);
 
-enum Role { admin, employee, tailor, driver }
-enum Stage { newBooking, assigned, onWay, tailoring, ready, delivered }
+enum Role { admin, employee, receptionistSupervisor, driverSupervisor, receptionist, tailor, driver }
+
+enum Stage { newBooking, branchAssigned, assigned, onWay, tailoring, ready, delivered }
+
+const ordersStorageKey = 'tailor_express_orders_v1';
 
 Role? roleFromSlug(String slug) {
   for (final role in Role.values) {
@@ -19,23 +26,36 @@ Role? roleFromSlug(String slug) {
 }
 
 String roleLabel(Role role, bool ar) => switch (role) {
-      Role.admin => ar ? 'الإدارة' : 'Admin',
-      Role.employee => ar ? 'الموظف' : 'Employee',
+      Role.admin => ar ? 'الإدارة' : 'Management',
+      Role.employee => ar ? 'خدمة العملاء' : 'Customer Service',
+      Role.receptionistSupervisor =>
+        ar ? 'مشرف الاستقبال' : 'Receptionist Supervisor',
+      Role.driverSupervisor => ar ? 'مشرف السائقين' : 'Driver Supervisor',
+      Role.receptionist => ar ? 'الاستقبال' : 'Receptionist',
       Role.tailor => ar ? 'الخياط' : 'Tailor',
       Role.driver => ar ? 'السائق' : 'Driver',
     };
 
 String stageLabel(Stage stage, bool ar) => switch (stage) {
       Stage.newBooking => ar ? 'جديد' : 'New',
-      Stage.assigned => ar ? 'تم التعيين' : 'Assigned',
-      Stage.onWay => ar ? 'السائق في الطريق' : 'Driver on the way',
+      Stage.branchAssigned => ar ? 'تم تعيين الفرع' : 'Branch assigned',
+      Stage.assigned => ar ? 'تم تعيين السائق' : 'Driver assigned',
+      Stage.onWay => ar ? 'تم الإرسال' : 'Dispatched',
       Stage.tailoring => ar ? 'قيد الخياطة' : 'In tailoring',
-      Stage.ready => ar ? 'جاهز للتسليم' : 'Ready for delivery',
+      Stage.ready => ar ? 'جاهز' : 'Ready',
       Stage.delivered => ar ? 'تم التسليم' : 'Delivered',
     };
 
+Stage stageFromKey(String value) {
+  for (final stage in Stage.values) {
+    if (stage.name == value) return stage;
+  }
+  return Stage.newBooking;
+}
+
 Color stageColor(Stage stage) => switch (stage) {
       Stage.newBooking => const Color(0xFF977527),
+      Stage.branchAssigned => const Color(0xFF8A6E2F),
       Stage.assigned => const Color(0xFF2D8AB1),
       Stage.onWay => const Color(0xFF2A63B5),
       Stage.tailoring => const Color(0xFF6D58A5),
@@ -61,6 +81,8 @@ class Order {
     required this.service,
     required this.preference,
     required this.window,
+    this.branch = 'Pending assignment',
+    this.receptionist = 'Pending assignment',
     required this.driver,
     required this.tailor,
     required this.stage,
@@ -79,6 +101,8 @@ class Order {
   final String service;
   final String preference;
   final String window;
+  final String branch;
+  final String receptionist;
   final String driver;
   final String tailor;
   final Stage stage;
@@ -88,10 +112,91 @@ class Order {
   final List<String> timeline;
 
   String area(bool isArabic) => isArabic ? areaAr : areaEn;
+
+  bool get hasBranch => !isPendingAssignment(branch);
+  bool get hasReceptionist => !isPendingAssignment(receptionist);
+  bool get hasDriver => !isPendingAssignment(driver);
+
+
+  Order copyWith({
+    String? branch,
+    String? receptionist,
+    String? driver,
+    String? tailor,
+    Stage? stage,
+    List<String>? timeline,
+    String? notes,
+  }) =>
+      Order(
+        id: id,
+        customer: customer,
+        mobile: mobile,
+        areaEn: areaEn,
+        areaAr: areaAr,
+        address: address,
+        service: service,
+        preference: preference,
+        window: window,
+        branch: branch ?? this.branch,
+        receptionist: receptionist ?? this.receptionist,
+        driver: driver ?? this.driver,
+        tailor: tailor ?? this.tailor,
+        stage: stage ?? this.stage,
+        lat: lat,
+        lng: lng,
+        notes: notes ?? this.notes,
+        timeline: timeline ?? this.timeline,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'customer': customer,
+        'mobile': mobile,
+        'areaEn': areaEn,
+        'areaAr': areaAr,
+        'address': address,
+        'service': service,
+        'preference': preference,
+        'window': window,
+        'branch': branch,
+        'receptionist': receptionist,
+        'driver': driver,
+        'tailor': tailor,
+        'stage': stage.name,
+        'lat': lat,
+        'lng': lng,
+        'notes': notes,
+        'timeline': timeline,
+      };
+
+  factory Order.fromJson(Map<String, dynamic> json) => Order(
+        id: json['id'] as String? ?? '',
+        customer: json['customer'] as String? ?? '',
+        mobile: json['mobile'] as String? ?? '',
+        areaEn: json['areaEn'] as String? ?? '',
+        areaAr: json['areaAr'] as String? ?? '',
+        address: json['address'] as String? ?? '',
+        service: json['service'] as String? ?? '',
+        preference: json['preference'] as String? ?? '',
+        window: json['window'] as String? ?? '',
+        branch: json['branch'] as String? ?? 'Pending assignment',
+        receptionist: json['receptionist'] as String? ?? 'Pending assignment',
+        driver: json['driver'] as String? ?? '',
+        tailor: json['tailor'] as String? ?? '',
+        stage: stageFromKey(json['stage'] as String? ?? ''),
+        lat: (json['lat'] as num?)?.toDouble() ?? 0,
+        lng: (json['lng'] as num?)?.toDouble() ?? 0,
+        notes: json['notes'] as String? ?? '',
+        timeline: [
+          for (final item in (json['timeline'] as List? ?? const <dynamic>[]))
+            item.toString(),
+        ],
+      );
 }
 
 class Complaint {
-  const Complaint(this.orderId, this.customer, this.typeEn, this.typeAr, this.message, this.date);
+  const Complaint(this.orderId, this.customer, this.typeEn, this.typeAr,
+      this.message, this.date);
   final String orderId;
   final String customer;
   final String typeEn;
@@ -99,6 +204,24 @@ class Complaint {
   final String message;
   final String date;
   String type(bool isArabic) => isArabic ? typeAr : typeEn;
+}
+
+
+const staffReceptionists = <String>['Aisha', 'Fatima', 'Mona', 'Noura'];
+const staffDrivers = <String>['Omar', 'Khaled', 'Yousef', 'Nasser'];
+
+bool isPendingAssignment(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized.isEmpty ||
+      normalized.contains('pending') ||
+      normalized.contains('\u0628\u0627\u0646\u062a\u0638\u0627\u0631');
+}
+
+String timelineNow(String note) {
+  final now = DateTime.now();
+  final stamp =
+      '${now.day.toString().padLeft(2, '0')}-${now.month.toString().padLeft(2, '0')}-${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+  return '$stamp - $note';
 }
 
 final kuwaitAreas = <Area>[
@@ -198,9 +321,27 @@ final kuwaitAreas = <Area>[
 ];
 
 const complaints = <Complaint>[
-  Complaint('TE-2401', 'Sara Alhamad', 'Appointment delay', 'تأخير موعد', 'Customer asked for a tighter visit window before evening pickup.', '29-07-2026, 02:18 PM'),
-  Complaint('TE-2402', 'Rana', 'Quality follow-up', 'متابعة الجودة', 'Customer wants confirmation before final delivery dispatch.', '28-07-2026, 09:54 PM'),
-  Complaint('TE-2404', 'Abeer Alajmi', 'Order issue', 'مشكلة في الطلب', 'Requested an employee callback regarding fitting notes.', '27-07-2026, 03:31 PM'),
+  Complaint(
+      'TE-2401',
+      'Sara Alhamad',
+      'Appointment delay',
+      'تأخير موعد',
+      'Customer asked for a tighter visit window before evening pickup.',
+      '29-07-2026, 02:18 PM'),
+  Complaint(
+      'TE-2402',
+      'Rana',
+      'Quality follow-up',
+      'متابعة الجودة',
+      'Customer wants confirmation before final delivery dispatch.',
+      '28-07-2026, 09:54 PM'),
+  Complaint(
+      'TE-2404',
+      'Abeer Alajmi',
+      'Order issue',
+      'مشكلة في الطلب',
+      'Requested an employee callback regarding fitting notes.',
+      '27-07-2026, 03:31 PM'),
 ];
 
 const seedOrders = <Order>[
@@ -220,7 +361,11 @@ const seedOrders = <Order>[
     lat: 29.3606,
     lng: 47.9275,
     notes: 'Evening pickup and quick size check.',
-    timeline: ['28-07-2026 08:12 PM • Booking approved', '29-07-2026 10:10 AM • Tailor assigned', '29-07-2026 06:58 PM • Driver dispatched'],
+    timeline: [
+      '28-07-2026 08:12 PM • Booking approved',
+      '29-07-2026 10:10 AM • Tailor assigned',
+      '29-07-2026 06:58 PM • Driver dispatched'
+    ],
   ),
   Order(
     id: 'TE-2402',
@@ -238,7 +383,11 @@ const seedOrders = <Order>[
     lat: 29.3442,
     lng: 48.0045,
     notes: 'Evening dress fitting before travel.',
-    timeline: ['27-07-2026 07:20 PM • Booking approved', '28-07-2026 01:15 PM • Tailoring in progress', '29-07-2026 03:40 PM • Ready for delivery'],
+    timeline: [
+      '27-07-2026 07:20 PM • Booking approved',
+      '28-07-2026 01:15 PM • Tailoring in progress',
+      '29-07-2026 03:40 PM • Ready for delivery'
+    ],
   ),
   Order(
     id: 'TE-2403',
@@ -256,7 +405,11 @@ const seedOrders = <Order>[
     lat: 29.3664,
     lng: 47.9798,
     notes: 'Delivery completed and received by customer.',
-    timeline: ['26-07-2026 10:40 AM • Booking approved', '27-07-2026 04:15 PM • Tailoring in progress', '29-07-2026 03:02 PM • Delivered to customer'],
+    timeline: [
+      '26-07-2026 10:40 AM • Booking approved',
+      '27-07-2026 04:15 PM • Tailoring in progress',
+      '29-07-2026 03:02 PM • Delivered to customer'
+    ],
   ),
   Order(
     id: 'TE-2404',
@@ -274,15 +427,27 @@ const seedOrders = <Order>[
     lat: 29.2857,
     lng: 47.8890,
     notes: 'Customer prefers a call before arrival.',
-    timeline: ['29-07-2026 09:30 AM • Booking approved', '29-07-2026 11:00 AM • Tailor reserved'],
+    timeline: [
+      '29-07-2026 09:30 AM • Booking approved',
+      '29-07-2026 11:00 AM • Tailor reserved'
+    ],
   ),
 ];
 
 class AppState extends ChangeNotifier {
+  AppState() {
+    _loadOrders();
+    unawaited(refreshOrders());
+    _poller = Timer.periodic(const Duration(seconds: 8), (_) {
+      unawaited(refreshOrders(quiet: true));
+    });
+  }
+
   bool isArabic = false;
   Role? role;
   String user = '';
-  final List<Order> orders = List<Order>.from(seedOrders);
+  final List<Order> orders = [];
+  Timer? _poller;
 
   String t(String en, String ar) => isArabic ? ar : en;
   TextDirection get dir => isArabic ? TextDirection.rtl : TextDirection.ltr;
@@ -297,6 +462,9 @@ class AppState extends ChangeNotifier {
     final ok = switch (nextRole) {
       Role.admin => name == 'admin' && pass == 'Admin123!',
       Role.employee => name == 'ops' && pass == 'Ops123!',
+      Role.receptionistSupervisor => name == 'reception-lead' && pass == 'ReceptionLead123!',
+      Role.driverSupervisor => name == 'driver-lead' && pass == 'DriverLead123!',
+      Role.receptionist => name == 'reception' && pass == 'Reception123!',
       Role.tailor => name == 'afroz' && pass == 'Tailor123!',
       Role.driver => name == 'omar' && pass == 'Driver123!',
     };
@@ -315,6 +483,102 @@ class AppState extends ChangeNotifier {
 
   bool canOpen(Role target) => role == target;
 
+  String apiUrl(String path) {
+    const configured = String.fromEnvironment('API_BASE', defaultValue: '');
+    if (configured.isNotEmpty) {
+      return Uri.parse(configured).resolve(path).toString();
+    }
+    final host = html.window.location.hostname;
+    if (host == '127.0.0.1' || host == 'localhost') {
+      return 'http://127.0.0.1:8090$path';
+    }
+    return Uri.base.resolve(path).toString();
+  }
+
+  void _loadOrders() {
+    orders.clear();
+    final raw = html.window.localStorage[ordersStorageKey];
+    if (raw == null || raw.isEmpty) {
+      orders.addAll(seedOrders);
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        orders.addAll(
+          decoded
+              .whereType<Object?>()
+              .map((item) => item is Map
+                  ? Order.fromJson(Map<String, dynamic>.from(item))
+                  : null)
+              .whereType<Order>(),
+        );
+      }
+    } catch (_) {
+      orders
+        ..clear()
+        ..addAll(seedOrders);
+      return;
+    }
+    if (orders.isEmpty) {
+      orders.addAll(seedOrders);
+    }
+  }
+
+  void _saveOrders() {
+    html.window.localStorage[ordersStorageKey] = jsonEncode(
+      orders.map((order) => order.toJson()).toList(),
+    );
+  }
+
+  List<Order>? _decodeOrders(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) return null;
+    return decoded
+        .whereType<Object?>()
+        .map((item) => item is Map
+            ? Order.fromJson(Map<String, dynamic>.from(item))
+            : null)
+        .whereType<Order>()
+        .toList();
+  }
+
+  bool _sameOrders(List<Order> next) {
+    if (orders.length != next.length) return false;
+    for (var i = 0; i < orders.length; i++) {
+      final a = orders[i];
+      final b = next[i];
+      if (a.id != b.id ||
+          a.stage != b.stage ||
+          a.driver != b.driver ||
+          a.tailor != b.tailor ||
+          a.notes != b.notes) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<void> refreshOrders({bool quiet = false}) async {
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/orders'),
+        method: 'GET',
+        requestHeaders: {'Accept': 'application/json'},
+      );
+      final remote = _decodeOrders(response.responseText);
+      if (remote == null || _sameOrders(remote)) return;
+      orders
+        ..clear()
+        ..addAll(remote);
+      _saveOrders();
+      notifyListeners();
+    } catch (_) {
+      if (!quiet) notifyListeners();
+    }
+  }
+
   Order? byId(String id) {
     for (final order in orders) {
       if (order.id.toLowerCase() == id.trim().toLowerCase()) return order;
@@ -322,7 +586,41 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  Order createBooking({
+
+  Future<String> createPaymentLink({
+    required Order order,
+    required double amount,
+    required String method,
+  }) async {
+    final response = await html.HttpRequest.request(
+      apiUrl('/api/payments/create'),
+      method: 'POST',
+      sendData: jsonEncode({
+        'orderId': order.id,
+        'customer': order.customer,
+        'mobile': order.mobile,
+        'service': order.service,
+        'amount': amount,
+        'method': method,
+      }),
+      requestHeaders: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    );
+    final status = response.status ?? 0;
+    final body = response.responseText == null || response.responseText!.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map);
+    if (status < 200 || status >= 300) {
+      throw Exception(body['error']?.toString() ?? 'Payment request failed.');
+    }
+    final url = body['paymentUrl']?.toString() ?? '';
+    if (url.isEmpty) throw Exception('Payment URL was not returned.');
+    return url;
+  }
+
+  Future<Order> createBooking({
     required String customer,
     required String mobile,
     required Area area,
@@ -333,29 +631,144 @@ class AppState extends ChangeNotifier {
     required String preference,
     required String window,
     required String notes,
-  }) {
-    final id = 'TE-${2400 + orders.length + 1}';
-    final order = Order(
-      id: id,
+    required String paymentMethod,
+  }) async {
+    final payload = {
+      'customer': customer,
+      'mobile': mobile,
+      'areaEn': area.en,
+      'areaAr': area.ar,
+      'block': block,
+      'street': street,
+      'building': building,
+      'service': service,
+      'preference': preference,
+      'window': window,
+      'notes': notes,
+      'paymentMethod': paymentMethod,
+      'language': isArabic ? 'ar' : 'en',
+    };
+
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/orders'),
+        method: 'POST',
+        sendData: jsonEncode(payload),
+        requestHeaders: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      final status = response.status ?? 0;
+      if (status >= 200 && status < 300 && response.responseText != null) {
+        final created = Order.fromJson(Map<String, dynamic>.from(
+            jsonDecode(response.responseText!) as Map));
+        orders.removeWhere((order) => order.id == created.id);
+        orders.insert(0, created);
+        _saveOrders();
+        notifyListeners();
+        return created;
+      }
+    } catch (_) {}
+
+    final local = Order(
+      id: 'LOCAL-${DateTime.now().millisecondsSinceEpoch}',
       customer: customer,
       mobile: mobile,
       areaEn: area.en,
       areaAr: area.ar,
-      address: isArabic ? '${area.ar}، قطعة $block، شارع $street، مبنى $building' : '${area.en}, Block $block, Street $street, Building $building',
+      address: isArabic
+          ? '${area.ar}\u060c \u0642\u0637\u0639\u0629 $block\u060c \u0634\u0627\u0631\u0639 $street\u060c \u0645\u0628\u0646\u0649 $building'
+          : '${area.en}, Block $block, Street $street, Building $building',
       service: service,
       preference: preference,
       window: window,
-      driver: t('Pending assignment', 'بانتظار التعيين'),
-      tailor: t('Pending assignment', 'بانتظار التعيين'),
+      branch: t('Pending assignment',
+          '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u062a\u0639\u064a\u064a\u0646'),
+      receptionist: t('Pending assignment',
+          '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u062a\u0639\u064a\u064a\u0646'),
+      driver: t('Pending assignment',
+          '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u062a\u0639\u064a\u064a\u0646'),
+      tailor: t('Pending assignment',
+          '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u062a\u0639\u064a\u064a\u0646'),
       stage: Stage.newBooking,
       lat: 29.3759,
       lng: 47.9774,
       notes: notes,
-      timeline: [t('Now • Booking submitted', 'الآن • تم إرسال الحجز'), t('Next • Operations will assign tailor and driver', 'لاحقاً • سيتم تعيين الخياط والسائق')],
+      timeline: [
+        t('Now - Booking submitted',
+            '\u0627\u0644\u0622\u0646 - \u062a\u0645 \u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u062d\u062c\u0632'),
+        t('Next - Operations will assign tailor and driver',
+            '\u0644\u0627\u062d\u0642\u0627\u064b - \u0633\u064a\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u0627\u0644\u062e\u064a\u0627\u0637 \u0648\u0627\u0644\u0633\u0627\u0626\u0642'),
+      ],
     );
-    orders.insert(0, order);
+    orders.insert(0, local);
+    _saveOrders();
     notifyListeners();
-    return order;
+    return local;
+  }
+
+
+  Future<void> updateOrder(
+    String id, {
+    String? branch,
+    String? receptionist,
+    String? driver,
+    String? tailor,
+    Stage? stage,
+    String? timelineNote,
+  }) async {
+    final index = orders.indexWhere((order) => order.id == id);
+    if (index == -1) return;
+    final original = orders[index];
+    final nextTimeline = timelineNote == null
+        ? original.timeline
+        : [...original.timeline, timelineNow(timelineNote)];
+    final local = original.copyWith(
+      branch: branch,
+      receptionist: receptionist,
+      driver: driver,
+      tailor: tailor,
+      stage: stage,
+      timeline: nextTimeline,
+    );
+
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/orders/$id'),
+        method: 'PATCH',
+        sendData: jsonEncode({
+          if (branch != null) 'branch': branch,
+          if (receptionist != null) 'receptionist': receptionist,
+          if (driver != null) 'driver': driver,
+          if (tailor != null) 'tailor': tailor,
+          if (stage != null) 'stage': stage.name,
+          if (timelineNote != null) 'timelineNote': timelineNote,
+        }),
+        requestHeaders: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      final status = response.status ?? 0;
+      if (status >= 200 && status < 300 && response.responseText != null) {
+        orders[index] = Order.fromJson(
+            Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map));
+        _saveOrders();
+        notifyListeners();
+        return;
+      }
+    } catch (_) {}
+
+    orders[index] = local;
+    _saveOrders();
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _poller?.cancel();
+    super.dispose();
   }
 }
 
@@ -378,12 +791,21 @@ class TailorWebApp extends StatelessWidget {
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
               fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2D6BC))),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: gold)),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: Color(0xFFE2D6BC))),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: gold)),
             ),
           ),
-          builder: (context, child) => Directionality(textDirection: state.dir, child: child ?? const SizedBox.shrink()),
+          builder: (context, child) => Directionality(
+              textDirection: state.dir,
+              child: child ?? const SizedBox.shrink()),
+          initialRoute: browserInitialRoute(),
           onGenerateRoute: (settings) {
             final uri = Uri.parse(settings.name ?? '/');
             return MaterialPageRoute(builder: (_) => routeFor(uri));
@@ -393,18 +815,29 @@ class TailorWebApp extends StatelessWidget {
     );
   }
 
+  String browserInitialRoute() {
+    final path = html.window.location.pathname ?? '/';
+    final query = html.window.location.search ?? '';
+    final route = path.isEmpty || path == '/' ? '/booking' : path;
+    return '$route$query';
+  }
+
   Widget routeFor(Uri uri) {
     final path = uri.path.isEmpty ? '/' : uri.path;
     if (path == '/' || path == '/booking') return BookingPage(state: state);
-    if (path == '/track') return TrackPage(state: state, initialId: uri.queryParameters['order']);
+    if (path == '/track')
+      return TrackPage(state: state, initialId: uri.queryParameters['order']);
     if (path == '/staff') return StaffHubPage(state: state);
     if (path.startsWith('/login/')) {
-      final role = roleFromSlug(uri.pathSegments.length > 1 ? uri.pathSegments[1] : '');
+      final role =
+          roleFromSlug(uri.pathSegments.length > 1 ? uri.pathSegments[1] : '');
       if (role != null) return LoginPage(state: state, role: role);
     }
     if (path.startsWith('/dashboard/')) {
-      final role = roleFromSlug(uri.pathSegments.length > 1 ? uri.pathSegments[1] : '');
-      if (role == null || !state.canOpen(role)) return LockedPage(state: state, role: role);
+      final role =
+          roleFromSlug(uri.pathSegments.length > 1 ? uri.pathSegments[1] : '');
+      if (role == null || !state.canOpen(role))
+        return LockedPage(state: state, role: role);
       return DashboardPage(state: state, role: role);
     }
     return BookingPage(state: state);
@@ -412,7 +845,14 @@ class TailorWebApp extends StatelessWidget {
 }
 
 class Shell extends StatelessWidget {
-  const Shell({super.key, required this.state, required this.title, required this.subtitle, required this.body, this.public = false, this.role});
+  const Shell(
+      {super.key,
+      required this.state,
+      required this.title,
+      required this.subtitle,
+      required this.body,
+      this.public = false,
+      this.role});
   final AppState state;
   final String title;
   final String subtitle;
@@ -429,33 +869,81 @@ class Shell extends StatelessWidget {
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1240),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Wrap(alignment: WrapAlignment.spaceBetween, spacing: 12, runSpacing: 12, children: [
-                  brand(),
-                  Wrap(spacing: 10, runSpacing: 10, children: [
-                    if (public) nav(context, state.t('Book Service', 'احجز الخدمة'), '/booking'),
-                    if (public) nav(context, state.t('Track Order', 'تتبع الطلب'), '/track'),
-                    if (role != null && state.signedIn) Chip(label: Text('${roleLabel(role!, state.isArabic)} • ${state.user}')),
-                    OutlinedButton(onPressed: state.toggleLang, child: Text(state.isArabic ? 'EN' : 'AR')),
-                    if (role != null && state.signedIn)
-                      ElevatedButton(onPressed: () { final next = role!; state.logout(); Navigator.of(context).pushNamedAndRemoveUntil('/login/${next.name}', (r) => false); }, child: Text(state.t('Sign out', 'تسجيل الخروج'))),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          brand(),
+                          Wrap(spacing: 10, runSpacing: 10, children: [
+                            if (public)
+                              nav(
+                                  context,
+                                  state.t('Book Service', 'احجز الخدمة'),
+                                  '/booking'),
+                            if (public)
+                              nav(context, state.t('Track Order', 'تتبع الطلب'),
+                                  '/track'),
+                            if (role != null && state.signedIn)
+                              Chip(
+                                  label: Text(
+                                      '${roleLabel(role!, state.isArabic)} • ${state.user}')),
+                            OutlinedButton(
+                                onPressed: state.toggleLang,
+                                child: Text(state.isArabic ? 'EN' : 'AR')),
+                            if (role != null && state.signedIn)
+                              ElevatedButton(
+                                  onPressed: () {
+                                    final next = role!;
+                                    state.logout();
+                                    Navigator.of(context)
+                                        .pushNamedAndRemoveUntil(
+                                            '/login/${next.name}',
+                                            (r) => false);
+                                  },
+                                  child: Text(
+                                      state.t('Sign out', 'تسجيل الخروج'))),
+                          ]),
+                        ]),
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.all(28),
+                      decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(28),
+                          gradient: const LinearGradient(
+                              colors: [Color(0xFF15110D), Color(0xFF302518)])),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('TAILOR EXPRESS',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 2)),
+                            if (title.trim().isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(title,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 34,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.05)),
+                            ],
+                            if (subtitle.trim().isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(subtitle,
+                                  style: const TextStyle(
+                                      color: Color(0xFFE6D8BD), height: 1.5)),
+                            ],
+                          ]),
+                    ),
+                    const SizedBox(height: 20),
+                    body,
                   ]),
-                ]),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(28),
-                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(28), gradient: const LinearGradient(colors: [Color(0xFF15110D), Color(0xFF302518)])),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('TAILOR EXPRESS', style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: 2)),
-                    const SizedBox(height: 12),
-                    Text(title, style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w700, height: 1.05)),
-                    const SizedBox(height: 12),
-                    Text(subtitle, style: const TextStyle(color: Color(0xFFE6D8BD), height: 1.5)),
-                  ]),
-                ),
-                const SizedBox(height: 20),
-                body,
-              ]),
             ),
           ),
         ),
@@ -465,16 +953,22 @@ class Shell extends StatelessWidget {
 }
 
 Widget brand() => const Row(mainAxisSize: MainAxisSize.min, children: [
-  Icon(Icons.content_cut, color: gold),
-  SizedBox(width: 10),
-  Text('TAILOR EXPRESS', style: TextStyle(color: ink, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
-]);
+      Icon(Icons.content_cut, color: gold),
+      SizedBox(width: 10),
+      Text('TAILOR EXPRESS',
+          style: TextStyle(
+              color: ink, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
+    ]);
 
 Widget nav(BuildContext context, String label, String path) {
-  final current = (ModalRoute.of(context)?.settings.name ?? '').startsWith(path) ||
-      (path == '/booking' && (ModalRoute.of(context)?.settings.name == '/' || ModalRoute.of(context)?.settings.name == '/booking'));
+  final current =
+      (ModalRoute.of(context)?.settings.name ?? '').startsWith(path) ||
+          (path == '/booking' &&
+              (ModalRoute.of(context)?.settings.name == '/' ||
+                  ModalRoute.of(context)?.settings.name == '/booking'));
   return OutlinedButton(
-    style: OutlinedButton.styleFrom(backgroundColor: current ? const Color(0xFFFFF4DD) : Colors.white),
+    style: OutlinedButton.styleFrom(
+        backgroundColor: current ? const Color(0xFFFFF4DD) : Colors.white),
     onPressed: () => Navigator.of(context).pushReplacementNamed(path),
     child: Text(label),
   );
@@ -497,7 +991,7 @@ class _BookingPageState extends State<BookingPage> {
   final building = TextEditingController();
   final notes = TextEditingController();
   Area area = kuwaitAreas.first;
-  String service = 'Alterations';
+  String service = 'Tailoring';
   String preference = 'Women tailor';
   String window = '5:00 PM - 6:00 PM';
 
@@ -518,8 +1012,8 @@ class _BookingPageState extends State<BookingPage> {
     return Shell(
       state: s,
       public: true,
-      title: s.t('Public booking for all Kuwait areas with private staff portals behind separate links.', 'حجز عام لكل مناطق الكويت مع بوابات موظفين خاصة على روابط مستقلة.'),
-      subtitle: s.t('Customers only see booking and tracking. Admin, employee, tailor and driver dashboards require different links and role credentials.', 'العميل يرى الحجز والتتبع فقط. أما الإدارة والموظف والخياط والسائق فلهم روابط مختلفة وبيانات دخول مستقلة.'),
+      title: '',
+      subtitle: '',
       body: LayoutBuilder(
         builder: (context, constraints) {
           final narrow = constraints.maxWidth < 980;
@@ -568,39 +1062,70 @@ class _BookingPageState extends State<BookingPage> {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  field(name, s.t('Customer name', 'اسم العميل'), width: wideField),
-                  field(mobile, s.t('Mobile number', 'رقم الهاتف'), width: wideField, phone: true),
-                  SizedBox(
-                    width: wideField,
-                    child: DropdownButtonFormField<Area>(
-                      value: area,
-                      menuMaxHeight: 380,
-                      decoration: InputDecoration(labelText: s.t('Area', 'المنطقة')),
-                      items: [
-                        for (final item in kuwaitAreas)
-                          DropdownMenuItem(value: item, child: Text(item.name(s.isArabic))),
-                      ],
-                      onChanged: (v) => setState(() => area = v!),
-                    ),
-                  ),
+                  field(name, s.t('Customer name', 'اسم العميل'),
+                      width: wideField),
+                  field(mobile, s.t('Mobile number', 'رقم الهاتف'),
+                      width: wideField, phone: true),
+                  areaField(s, width: wideField),
                   field(block, s.t('Block', 'قطعة'), width: halfField),
                   field(street, s.t('Street', 'شارع'), width: halfField),
-                  field(building, s.t('Building / House', 'مبنى / منزل'), width: wideField),
-                  drop(s, s.t('Service', 'الخدمة'), service, ['Alterations', 'Tailoring', 'Occasion fitting', 'Urgent repair'], (v) => setState(() => service = v!), width: wideField),
-                  drop(s, s.t('Tailor preference', 'تفضيل الخياط'), preference, ['Women tailor', 'Men tailor', 'No preference'], (v) => setState(() => preference = v!), width: wideField),
-                  drop(s, s.t('Visit window', 'موعد الزيارة'), window, ['12:00 PM - 1:00 PM', '2:00 PM - 3:00 PM', '4:00 PM - 5:00 PM', '5:00 PM - 6:00 PM', '7:00 PM - 8:00 PM'], (v) => setState(() => window = v!), width: wideField),
+                  field(building, s.t('Building / House', 'مبنى / منزل'),
+                      width: wideField),
+                  drop(
+                      s,
+                      s.t('Service', 'الخدمة'),
+                      service,
+                      [
+                        'Tailoring',
+                        'Repair',
+                        'Urgent repair'
+                      ],
+                      (v) => setState(() => service = v!),
+                      width: wideField),
+                  drop(
+                      s,
+                      s.t('Tailor preference', 'تفضيل الخياط'),
+                      preference,
+                      ['Women tailor', 'Men tailor', 'No preference'],
+                      (v) => setState(() => preference = v!),
+                      width: wideField),
+                  drop(
+                      s,
+                      s.t('Visit window', 'موعد الزيارة'),
+                      window,
+                      [
+                        '12:00 PM - 1:00 PM',
+                        '2:00 PM - 3:00 PM',
+                        '4:00 PM - 5:00 PM',
+                        '5:00 PM - 6:00 PM',
+                        '7:00 PM - 8:00 PM'
+                      ],
+                      (v) => setState(() => window = v!),
+                      width: wideField),
                 ],
               ),
               const SizedBox(height: 12),
-              TextFormField(controller: notes, maxLines: 4, decoration: InputDecoration(labelText: s.t('Notes', 'ملاحظات'))),
+              TextFormField(
+                  controller: notes,
+                  maxLines: 4,
+                  decoration:
+                      InputDecoration(labelText: s.t('Notes', 'ملاحظات'))),
               const SizedBox(height: 16),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  ElevatedButton(onPressed: submit, child: Text(s.t('Review policy & pay', 'راجع السياسة وانتقل للدفع'))),
-                  OutlinedButton(onPressed: () => showPolicyPreview(), child: Text(s.t('Preview policies', 'عرض السياسات'))),
-                  OutlinedButton(onPressed: () => Navigator.of(context).pushReplacementNamed('/track'), child: Text(s.t('Open tracking', 'افتح التتبع'))),
+                  ElevatedButton(
+                      onPressed: submit,
+                      child: Text(s.t(
+                          'Review policy & pay', 'راجع السياسة وانتقل للدفع'))),
+                  OutlinedButton(
+                      onPressed: () => showPolicyPreview(),
+                      child: Text(s.t('Preview policies', 'عرض السياسات'))),
+                  OutlinedButton(
+                      onPressed: () =>
+                          Navigator.of(context).pushReplacementNamed('/track'),
+                      child: Text(s.t('Open tracking', 'افتح التتبع'))),
                 ],
               ),
             ],
@@ -623,9 +1148,13 @@ class _BookingPageState extends State<BookingPage> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
-            bullet(s.t('Policies are shown before payment and must be accepted.', 'يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.')),
-            bullet(s.t('The customer moves to payment only after agreeing.', 'ينتقل العميل إلى الدفع فقط بعد الموافقة.')),
-            bullet(s.t('Admin policy text is reused here automatically.', 'يتم استخدام نص سياسات الإدارة هنا تلقائياً.')),
+            bullet(s.t(
+                'Policies are shown before payment and must be accepted.',
+                'يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.')),
+            bullet(s.t('The customer moves to payment only after agreeing.',
+                'ينتقل العميل إلى الدفع فقط بعد الموافقة.')),
+            bullet(s.t('Admin policy text is reused here automatically.',
+                'يتم استخدام نص سياسات الإدارة هنا تلقائياً.')),
             const SizedBox(height: 10),
             for (final policy in adminPolicies)
               Container(
@@ -639,7 +1168,8 @@ class _BookingPageState extends State<BookingPage> {
                 ),
                 child: Text(
                   s.isArabic ? policy.nameAr : policy.nameEn,
-                  style: const TextStyle(fontWeight: FontWeight.w700, color: ink),
+                  style:
+                      const TextStyle(fontWeight: FontWeight.w700, color: ink),
                 ),
               ),
           ],
@@ -648,25 +1178,108 @@ class _BookingPageState extends State<BookingPage> {
     );
   }
 
-  Widget field(TextEditingController c, String label, {required double width, bool phone = false}) => SizedBox(
-    width: width,
-    child: TextFormField(
-      controller: c,
-      keyboardType: phone ? TextInputType.phone : TextInputType.text,
-      validator: (v) => v == null || v.trim().isEmpty ? widget.state.t('Required', 'مطلوب') : null,
-      decoration: InputDecoration(labelText: label),
-    ),
-  );
+  Widget field(TextEditingController c, String label,
+          {required double width, bool phone = false}) =>
+      SizedBox(
+        width: width,
+        child: TextFormField(
+          controller: c,
+          keyboardType: phone ? TextInputType.phone : TextInputType.text,
+          validator: (v) => v == null || v.trim().isEmpty
+              ? widget.state.t('Required', 'مطلوب')
+              : null,
+          decoration: InputDecoration(labelText: label),
+        ),
+      );
 
-  Widget drop(AppState s, String label, String value, List<String> items, ValueChanged<String?> onChanged, {required double width}) => SizedBox(
-    width: width,
-    child: DropdownButtonFormField<String>(
-      value: value,
-      decoration: InputDecoration(labelText: label),
-      items: [for (final item in items) DropdownMenuItem(value: item, child: Text(item))],
-      onChanged: onChanged,
-    ),
-  );
+  Widget areaField(AppState s, {required double width}) => SizedBox(
+        width: width,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: openAreaPicker,
+          child: InputDecorator(
+            decoration: InputDecoration(
+                labelText:
+                    s.t('Area', '\u0627\u0644\u0645\u0646\u0637\u0642\u0629')),
+            child: Row(
+              children: [
+                Expanded(
+                    child: Text(area.name(s.isArabic),
+                        overflow: TextOverflow.ellipsis)),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  Future<void> openAreaPicker() async {
+    final s = widget.state;
+    final selected = await showModalBottomSheet<Area>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.72,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                child: Text(
+                    s.t('Choose area',
+                        '\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u0646\u0637\u0642\u0629'),
+                    style: Theme.of(context).textTheme.titleLarge),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                  itemCount: kuwaitAreas.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (context, index) {
+                    final item = kuwaitAreas[index];
+                    final chosen = item.en == area.en;
+                    return ListTile(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      tileColor: chosen
+                          ? const Color(0xFFFFF1CF)
+                          : const Color(0xFFFFFCF7),
+                      title: Text(item.name(s.isArabic)),
+                      trailing:
+                          chosen ? const Icon(Icons.check, color: gold) : null,
+                      onTap: () => Navigator.of(context).pop(item),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected != null) setState(() => area = selected);
+  }
+
+  Widget drop(AppState s, String label, String value, List<String> items,
+          ValueChanged<String?> onChanged,
+          {required double width}) =>
+      SizedBox(
+        width: width,
+        child: DropdownButtonFormField<String>(
+          value: value,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: label),
+          items: [
+            for (final item in items)
+              DropdownMenuItem(
+                  value: item,
+                  child: Text(item, overflow: TextOverflow.ellipsis))
+          ],
+          onChanged: onChanged,
+        ),
+      );
 
   void submit() {
     if (!form.currentState!.validate()) return;
@@ -686,7 +1299,9 @@ class _BookingPageState extends State<BookingPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(s.t('The customer must review these policy items before moving to payment.', 'يجب على العميل مراجعة هذه السياسات قبل الانتقال إلى الدفع.')),
+                Text(s.t(
+                    'The customer must review these policy items before moving to payment.',
+                    'يجب على العميل مراجعة هذه السياسات قبل الانتقال إلى الدفع.')),
                 const SizedBox(height: 14),
                 for (final policy in adminPolicies) policyCard(policy),
               ],
@@ -694,7 +1309,9 @@ class _BookingPageState extends State<BookingPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(s.t('Close', 'إغلاق'))),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(s.t('Close', 'إغلاق'))),
         ],
       ),
     );
@@ -708,30 +1325,41 @@ class _BookingPageState extends State<BookingPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text(s.t('Review policy before payment', 'راجع السياسة قبل الدفع')),
+          title: Text(
+              s.t('Review policy before payment', 'راجع السياسة قبل الدفع')),
           content: SizedBox(
             width: dialogWidth,
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(s.t('Payment is locked until the customer agrees to the booking policies below.', 'يتم قفل الدفع حتى يوافق العميل على سياسات الحجز التالية.')),
+                  Text(s.t(
+                      'Payment is locked until the customer agrees to the booking policies below.',
+                      'يتم قفل الدفع حتى يوافق العميل على سياسات الحجز التالية.')),
                   const SizedBox(height: 14),
                   for (final policy in adminPolicies) policyCard(policy),
                   const SizedBox(height: 12),
                   CheckboxListTile(
                     value: agreed,
                     contentPadding: EdgeInsets.zero,
-                    onChanged: (value) => setDialogState(() => agreed = value ?? false),
-                    title: Text(s.t('I have read and agree to these policies before payment.', 'لقد قرأت هذه السياسات وأوافق عليها قبل الدفع.')),
+                    onChanged: (value) =>
+                        setDialogState(() => agreed = value ?? false),
+                    title: Text(s.t(
+                        'I have read and agree to these policies before payment.',
+                        'لقد قرأت هذه السياسات وأوافق عليها قبل الدفع.')),
                   ),
                 ],
               ),
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(s.t('Back', 'رجوع'))),
-            ElevatedButton(onPressed: agreed ? () => Navigator.of(context).pop(true) : null, child: Text(s.t('Proceed to payment', 'الانتقال إلى الدفع'))),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(s.t('Back', 'رجوع'))),
+            ElevatedButton(
+                onPressed:
+                    agreed ? () => Navigator.of(context).pop(true) : null,
+                child: Text(s.t('Proceed to payment', 'الانتقال إلى الدفع'))),
           ],
         ),
       ),
@@ -758,22 +1386,44 @@ class _BookingPageState extends State<BookingPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(s.t('Choose a payment method after agreeing to the policies.', 'اختر طريقة الدفع بعد الموافقة على السياسات.')),
+                  Text(s.t(
+                      'Choose a payment method after agreeing to the policies.',
+                      'اختر طريقة الدفع بعد الموافقة على السياسات.')),
                   const SizedBox(height: 14),
-                  RadioListTile<String>(value: 'KNET', groupValue: method, onChanged: (value) => setDialogState(() => method = value ?? 'KNET'), title: const Text('KNET')),
-                  RadioListTile<String>(value: 'Visa / MasterCard', groupValue: method, onChanged: (value) => setDialogState(() => method = value ?? 'KNET'), title: const Text('Visa / MasterCard')),
-                  RadioListTile<String>(value: s.t('Cash on pickup', 'نقداً عند الاستلام'), groupValue: method, onChanged: (value) => setDialogState(() => method = value ?? 'KNET'), title: Text(s.t('Cash on pickup', 'نقداً عند الاستلام'))),
+                  RadioListTile<String>(
+                      value: 'KNET',
+                      groupValue: method,
+                      onChanged: (value) =>
+                          setDialogState(() => method = value ?? 'KNET'),
+                      title: const Text('KNET')),
+                  RadioListTile<String>(
+                      value: 'Visa / MasterCard',
+                      groupValue: method,
+                      onChanged: (value) =>
+                          setDialogState(() => method = value ?? 'KNET'),
+                      title: const Text('Visa / MasterCard')),
+                  RadioListTile<String>(
+                      value: s.t('Cash on pickup', 'نقداً عند الاستلام'),
+                      groupValue: method,
+                      onChanged: (value) =>
+                          setDialogState(() => method = value ?? 'KNET'),
+                      title: Text(s.t('Cash on pickup', 'نقداً عند الاستلام'))),
                   const SizedBox(height: 10),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: const Color(0xFFFFF7E7), borderRadius: BorderRadius.circular(14)),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFFFF7E7),
+                        borderRadius: BorderRadius.circular(14)),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(s.t('Home service visit', 'زيارة الخدمة المنزلية'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                        Text(s.t('Home service visit', 'زيارة الخدمة المنزلية'),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 6),
-                        Text(s.t('Demo amount: KD 3.500', 'المبلغ التجريبي: 3.500 د.ك')),
+                        Text(s.t('Amount: KD 3.500',
+                            'المبلغ: 3.500 د.ك')),
                       ],
                     ),
                   ),
@@ -782,8 +1432,12 @@ class _BookingPageState extends State<BookingPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(s.t('Back', 'رجوع'))),
-            ElevatedButton(onPressed: () => Navigator.of(context).pop(method), child: Text(s.t('Pay now', 'ادفع الآن'))),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(s.t('Back', 'رجوع'))),
+            ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(method),
+                child: Text(s.t('Pay now', 'ادفع الآن'))),
           ],
         ),
       ),
@@ -791,9 +1445,13 @@ class _BookingPageState extends State<BookingPage> {
 
     if (paid == null || !mounted) return;
 
+    const amount = 3.5;
+    final cashLabel = s.t('Cash on pickup', 'نقداً عند الاستلام');
     final paymentNote = s.isArabic ? 'الدفع: $paid' : 'Payment: $paid';
-    final mergedNotes = notes.text.trim().isEmpty ? paymentNote : '${notes.text.trim()} | $paymentNote';
-    final order = widget.state.createBooking(
+    final mergedNotes = notes.text.trim().isEmpty
+        ? paymentNote
+        : '${notes.text.trim()} | $paymentNote';
+    final order = await widget.state.createBooking(
       customer: name.text.trim(),
       mobile: mobile.text.trim(),
       area: area,
@@ -804,9 +1462,32 @@ class _BookingPageState extends State<BookingPage> {
       preference: preference,
       window: window,
       notes: mergedNotes,
+      paymentMethod: paid,
     );
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.t('Payment completed. Booking created.', 'تم الدفع وإنشاء الحجز.'))));
+    if (paid != cashLabel) {
+      try {
+        final paymentUrl = await widget.state.createPaymentLink(
+          order: order,
+          amount: amount,
+          method: paid,
+        );
+        await launchUrl(Uri.parse(paymentUrl), webOnlyWindowName: '_blank');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(s.t('Payment page opened. Booking created.',
+                'تم فتح صفحة الدفع وإنشاء الحجز.'))));
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(s.t(
+                'Booking created, but payment API is not configured yet.',
+                'تم إنشاء الحجز، لكن واجهة الدفع غير مفعلة بعد.'))));
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(s.t('Booking created.', 'تم إنشاء الحجز.'))));
+    }
     Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
   }
 
@@ -816,11 +1497,15 @@ class _BookingPageState extends State<BookingPage> {
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: const Color(0xFFFFFCF7), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE6D9BE))),
+      decoration: BoxDecoration(
+          color: const Color(0xFFFFFCF7),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE6D9BE))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(s.isArabic ? policy.nameAr : policy.nameEn, style: const TextStyle(color: ink, fontWeight: FontWeight.w700)),
+          Text(s.isArabic ? policy.nameAr : policy.nameEn,
+              style: const TextStyle(color: ink, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Text(s.isArabic ? policy.detailAr : policy.detailEn),
         ],
@@ -839,6 +1524,7 @@ class _BookingPageState extends State<BookingPage> {
     return desktopWidth;
   }
 }
+
 class TrackPage extends StatefulWidget {
   const TrackPage({super.key, required this.state, this.initialId});
   final AppState state;
@@ -849,13 +1535,23 @@ class TrackPage extends StatefulWidget {
 }
 
 class _TrackPageState extends State<TrackPage> {
-  late final TextEditingController id = TextEditingController(text: widget.initialId ?? '');
+  late final TextEditingController id =
+      TextEditingController(text: widget.initialId ?? '');
   Order? order;
 
   @override
   void initState() {
     super.initState();
-    if ((widget.initialId ?? '').isNotEmpty) order = widget.state.byId(widget.initialId!);
+    _loadInitialOrder();
+  }
+
+  Future<void> _loadInitialOrder() async {
+    final initial = widget.initialId ?? '';
+    if (initial.isEmpty) return;
+    order = widget.state.byId(initial);
+    await widget.state.refreshOrders(quiet: true);
+    if (!mounted) return;
+    setState(() => order = widget.state.byId(initial));
   }
 
   @override
@@ -870,8 +1566,12 @@ class _TrackPageState extends State<TrackPage> {
     return Shell(
       state: s,
       public: true,
-      title: s.t('Customer-safe tracking page for pickup, tailoring and delivery status.', 'صفحة تتبع آمنة للعميل لحالة الاستلام والخياطة والتوصيل.'),
-      subtitle: s.t('Drivers can share this route with customers. The customer still cannot see internal dashboards.', 'يمكن للسائق مشاركة هذا الرابط مع العميل، لكن العميل لا يمكنه رؤية اللوحات الداخلية.'),
+      title: s.t(
+          'Customer-safe tracking page for pickup, tailoring and delivery status.',
+          'صفحة تتبع آمنة للعميل لحالة الاستلام والخياطة والتوصيل.'),
+      subtitle: s.t(
+          'Drivers can share this route with customers. The customer still cannot see internal dashboards.',
+          'يمكن للسائق مشاركة هذا الرابط مع العميل، لكن العميل لا يمكنه رؤية اللوحات الداخلية.'),
       body: LayoutBuilder(
         builder: (context, constraints) {
           final narrow = constraints.maxWidth < 980;
@@ -898,11 +1598,18 @@ class _TrackPageState extends State<TrackPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(s.t('Track order', 'تتبع الطلب'), style: Theme.of(context).textTheme.titleLarge),
+            Text(s.t('Track order', 'تتبع الطلب'),
+                style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 12),
-            TextField(controller: id, decoration: InputDecoration(labelText: s.t('Order ID', 'رقم الطلب'))),
+            TextField(
+                controller: id,
+                decoration:
+                    InputDecoration(labelText: s.t('Order ID', 'رقم الطلب'))),
             const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: ElevatedButton(onPressed: search, child: Text(s.t('Search', 'بحث')))),
+            SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                    onPressed: search, child: Text(s.t('Search', 'بحث')))),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -930,7 +1637,9 @@ class _TrackPageState extends State<TrackPage> {
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: order == null
-            ? Text(s.t('Search an order to show status, map links and assigned team.', 'ابحث عن طلب لإظهار الحالة وروابط الخريطة والفريق المخصص.'))
+            ? Text(s.t(
+                'Search an order to show status, map links and assigned team.',
+                'ابحث عن طلب لإظهار الحالة وروابط الخريطة والفريق المخصص.'))
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -939,31 +1648,46 @@ class _TrackPageState extends State<TrackPage> {
                     runSpacing: 12,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Text('${s.t('Order', 'الطلب')} ${order!.id}', style: Theme.of(context).textTheme.headlineSmall),
-                      badge(stageLabel(order!.stage, s.isArabic), stageColor(order!.stage)),
+                      Text('${s.t('Order', 'الطلب')} ${order!.id}',
+                          style: Theme.of(context).textTheme.headlineSmall),
+                      badge(stageLabel(order!.stage, s.isArabic),
+                          stageColor(order!.stage)),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Text('${order!.customer} • ${order!.mobile}'),
                   const SizedBox(height: 10),
-                  bullet('${s.t('Area', 'المنطقة')}: ${order!.area(s.isArabic)}'),
+                  bullet(
+                      '${s.t('Area', 'المنطقة')}: ${order!.area(s.isArabic)}'),
                   bullet('${s.t('Address', 'العنوان')}: ${order!.address}'),
                   bullet('${s.t('Service', 'الخدمة')}: ${order!.service}'),
                   bullet('${s.t('Tailor', 'الخياط')}: ${order!.tailor}'),
                   bullet('${s.t('Driver', 'السائق')}: ${order!.driver}'),
-                  bullet('${s.t('Visit window', 'موعد الزيارة')}: ${order!.window}'),
+                  bullet(
+                      '${s.t('Visit window', 'موعد الزيارة')}: ${order!.window}'),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 12,
                     runSpacing: 12,
                     children: [
-                      ElevatedButton(onPressed: () => openMap(order!, true), child: const Text('Google Maps')),
-                      OutlinedButton(onPressed: () => openMap(order!, false), child: const Text('OpenStreetMap')),
-                      OutlinedButton(onPressed: () => copy(buildTrackingLink(order!.id), s.t('Tracking link copied.', 'تم نسخ رابط التتبع.')), child: Text(s.t('Copy tracking link', 'نسخ رابط التتبع'))),
+                      ElevatedButton(
+                          onPressed: () => openMap(order!, true),
+                          child: const Text('Google Maps')),
+                      OutlinedButton(
+                          onPressed: () => openMap(order!, false),
+                          child: const Text('OpenStreetMap')),
+                      OutlinedButton(
+                          onPressed: () => copy(
+                              buildTrackingLink(order!.id),
+                              s.t('Tracking link copied.',
+                                  'تم نسخ رابط التتبع.')),
+                          child: Text(
+                              s.t('Copy tracking link', 'نسخ رابط التتبع'))),
                     ],
                   ),
                   const SizedBox(height: 18),
-                  Text(s.t('Timeline', 'خط سير الطلب'), style: Theme.of(context).textTheme.titleLarge),
+                  Text(s.t('Timeline', 'خط سير الطلب'),
+                      style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 10),
                   for (final step in order!.timeline) bullet(step),
                 ],
@@ -977,7 +1701,8 @@ class _TrackPageState extends State<TrackPage> {
   Future<void> copy(String text, String message) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> openMap(Order order, bool google) async {
@@ -987,6 +1712,7 @@ class _TrackPageState extends State<TrackPage> {
     await launchUrl(Uri.parse(url), webOnlyWindowName: '_blank');
   }
 }
+
 class StaffHubPage extends StatelessWidget {
   const StaffHubPage({super.key, required this.state});
   final AppState state;
@@ -995,11 +1721,18 @@ class StaffHubPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Shell(
       state: state,
-      title: state.t('Protected staff links for admin, employee, tailor and driver.', 'روابط موظفين محمية للإدارة والموظف والخياط والسائق.'),
-      subtitle: state.t('This hub is outside the customer flow. Each role has a different link and password.', 'هذه البوابة خارج مسار العميل. لكل دور رابط مختلف وكلمة مرور مختلفة.'),
+      title: state.t(
+          'Protected staff links for admin, employee, tailor and driver.',
+          'روابط موظفين محمية للإدارة والموظف والخياط والسائق.'),
+      subtitle: state.t(
+          'This hub is outside the customer flow. Each role has a different link and password.',
+          'هذه البوابة خارج مسار العميل. لكل دور رابط مختلف وكلمة مرور مختلفة.'),
       body: Wrap(spacing: 16, runSpacing: 16, children: [
         loginCard(context, Role.admin, 'admin / Admin123!'),
         loginCard(context, Role.employee, 'ops / Ops123!'),
+        loginCard(context, Role.receptionistSupervisor, 'reception-lead / ReceptionLead123!'),
+        loginCard(context, Role.driverSupervisor, 'driver-lead / DriverLead123!'),
+        loginCard(context, Role.receptionist, 'reception / Reception123!'),
         loginCard(context, Role.tailor, 'afroz / Tailor123!'),
         loginCard(context, Role.driver, 'omar / Driver123!'),
       ]),
@@ -1007,17 +1740,27 @@ class StaffHubPage extends StatelessWidget {
   }
 
   Widget loginCard(BuildContext context, Role role, String creds) => SizedBox(
-    width: 280,
-    child: Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(roleLabel(role, state.isArabic), style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 8),
-      Text('/login/${role.name}'),
-      const SizedBox(height: 6),
-      Text(creds),
-      const SizedBox(height: 14),
-      ElevatedButton(onPressed: () => Navigator.of(context).pushReplacementNamed('/login/${role.name}'), child: Text(state.t('Open login', 'افتح صفحة الدخول'))),
-    ]))),
-  );
+        width: 280,
+        child: Card(
+            child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(roleLabel(role, state.isArabic),
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 8),
+                      Text('/login/${role.name}'),
+                      const SizedBox(height: 6),
+                      Text(creds),
+                      const SizedBox(height: 14),
+                      ElevatedButton(
+                          onPressed: () => Navigator.of(context)
+                              .pushReplacementNamed('/login/${role.name}'),
+                          child:
+                              Text(state.t('Open login', 'افتح صفحة الدخول'))),
+                    ]))),
+      );
 }
 
 class LoginPage extends StatefulWidget {
@@ -1034,15 +1777,23 @@ class _LoginPageState extends State<LoginPage> {
   final pass = TextEditingController();
 
   @override
-  void dispose() { user.dispose(); pass.dispose(); super.dispose(); }
+  void dispose() {
+    user.dispose();
+    pass.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
     return Shell(
       state: s,
-      title: s.t('${roleLabel(widget.role, false)} login on a separate private route.', 'تسجيل دخول ${roleLabel(widget.role, true)} عبر رابط خاص مستقل.'),
-      subtitle: s.t('Customers cannot browse from booking into this dashboard. The correct role password is required.', 'لا يمكن للعميل الوصول من الحجز إلى هذه اللوحة. يجب استخدام كلمة مرور الدور الصحيح.'),
+      title: s.t(
+          '${roleLabel(widget.role, false)} login on a separate private route.',
+          'تسجيل دخول ${roleLabel(widget.role, true)} عبر رابط خاص مستقل.'),
+      subtitle: s.t(
+          'Customers cannot browse from booking into this dashboard. The correct role password is required.',
+          'لا يمكن للعميل الوصول من الحجز إلى هذه اللوحة. يجب استخدام كلمة مرور الدور الصحيح.'),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 500),
@@ -1054,13 +1805,26 @@ class _LoginPageState extends State<LoginPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("${roleLabel(widget.role, s.isArabic)} ${s.t('Login', 'تسجيل الدخول')}", style: Theme.of(context).textTheme.headlineSmall),
+                    Text(
+                        "${roleLabel(widget.role, s.isArabic)} ${s.t('Login', 'تسجيل الدخول')}",
+                        style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 14),
-                    TextFormField(controller: user, validator: req, decoration: InputDecoration(labelText: s.t('Username', 'اسم المستخدم'))),
+                    TextFormField(
+                        controller: user,
+                        validator: req,
+                        decoration: InputDecoration(
+                            labelText: s.t('Username', 'اسم المستخدم'))),
                     const SizedBox(height: 12),
-                    TextFormField(controller: pass, validator: req, obscureText: true, decoration: InputDecoration(labelText: s.t('Password', 'كلمة المرور'))),
+                    TextFormField(
+                        controller: pass,
+                        validator: req,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                            labelText: s.t('Password', 'كلمة المرور'))),
                     const SizedBox(height: 16),
-                    ElevatedButton(onPressed: submit, child: Text(s.t('Enter dashboard', 'ادخل إلى اللوحة'))),
+                    ElevatedButton(
+                        onPressed: submit,
+                        child: Text(s.t('Enter dashboard', 'ادخل إلى اللوحة'))),
                   ],
                 ),
               ),
@@ -1071,15 +1835,20 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  String? req(String? v) => v == null || v.trim().isEmpty ? widget.state.t('Required', 'مطلوب') : null;
+  String? req(String? v) => v == null || v.trim().isEmpty
+      ? widget.state.t('Required', 'مطلوب')
+      : null;
 
   void submit() {
     if (!form.currentState!.validate()) return;
     if (!widget.state.login(widget.role, user.text.trim(), pass.text)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.state.t('Incorrect credentials for this role.', 'بيانات الدخول غير صحيحة لهذا الدور.'))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(widget.state.t('Incorrect credentials for this role.',
+              'بيانات الدخول غير صحيحة لهذا الدور.'))));
       return;
     }
-    Navigator.of(context).pushNamedAndRemoveUntil('/dashboard/${widget.role.name}', (r) => false);
+    Navigator.of(context).pushNamedAndRemoveUntil(
+        '/dashboard/${widget.role.name}', (r) => false);
   }
 }
 
@@ -1093,8 +1862,13 @@ class LockedPage extends StatelessWidget {
     return Shell(
       state: state,
       title: state.t('Access denied.', 'تم رفض الوصول.'),
-      subtitle: state.t('This dashboard needs the correct role login and stays hidden from customer pages.', 'هذه اللوحة تحتاج إلى تسجيل دخول الدور الصحيح وتبقى مخفية عن صفحات العميل.'),
-      body: ElevatedButton(onPressed: () => Navigator.of(context).pushReplacementNamed('/login/${target.name}'), child: Text(state.t('Go to login', 'اذهب إلى الدخول'))),
+      subtitle: state.t(
+          'This dashboard needs the correct role login and stays hidden from customer pages.',
+          'هذه اللوحة تحتاج إلى تسجيل دخول الدور الصحيح وتبقى مخفية عن صفحات العميل.'),
+      body: ElevatedButton(
+          onPressed: () => Navigator.of(context)
+              .pushReplacementNamed('/login/${target.name}'),
+          child: Text(state.t('Go to login', 'اذهب إلى الدخول'))),
     );
   }
 }
@@ -1109,57 +1883,537 @@ class DashboardPage extends StatelessWidget {
     if (role == Role.admin) {
       return AdminDashboard(state: state);
     }
+    if (role == Role.receptionistSupervisor) {
+      return ReceptionistSupervisorDashboard(state: state, role: role);
+    }
+    if (role == Role.driverSupervisor) {
+      return DriverSupervisorDashboard(state: state, role: role);
+    }
+    if (role == Role.receptionist) {
+      return ReceptionistDashboard(state: state, role: role);
+    }
 
-    final active = state.orders.where((o) => o.stage != Stage.delivered).toList();
+    final active =
+        state.orders.where((o) => o.stage != Stage.delivered).toList();
     final mine = switch (role) {
-      Role.driver => state.orders.where((o) => o.driver.toLowerCase().contains('omar') || o.stage == Stage.onWay).toList(),
-      Role.tailor => state.orders.where((o) => o.tailor.toLowerCase().contains('afroz')).toList(),
+      Role.driver => active,
+      Role.tailor => state.orders
+          .where((o) => o.tailor.toLowerCase().contains('afroz'))
+          .toList(),
       _ => state.orders,
     };
     return Shell(
       state: state,
       role: role,
-      title: state.t('${roleLabel(role, false)} dashboard on its own protected route.', 'لوحة ${roleLabel(role, true)} على رابطها المحمي الخاص.'),
-      subtitle: state.t('This route is separated from the public customer pages and locked by role.', 'هذا الرابط منفصل عن صفحات العميل العامة ومقفل حسب الدور.'),
+      title: state.t(
+          '${roleLabel(role, false)} dashboard on its own protected route.',
+          'لوحة ${roleLabel(role, true)} على رابطها المحمي الخاص.'),
+      subtitle: state.t(
+          'This route is separated from the public customer pages and locked by role.',
+          'هذا الرابط منفصل عن صفحات العميل العامة ومقفل حسب الدور.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(state.t('All orders', 'كل الطلبات'), '${state.orders.length}'),
-          metric(state.t('Active orders', 'الطلبات النشطة'), '${active.length}'),
-          metric(state.t('Open complaints', 'الشكاوى المفتوحة'), '${complaints.length}'),
+          metric(
+              state.t('Active orders', 'الطلبات النشطة'), '${active.length}'),
+          metric(state.t('Open complaints', 'الشكاوى المفتوحة'),
+              '${complaints.length}'),
         ]),
         const SizedBox(height: 18),
         if (role == Role.employee)
-          Card(child: Padding(padding: const EdgeInsets.all(22), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(state.t('Bookings overview', 'نظرة على الحجوزات'), style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            for (final o in state.orders.take(6)) ListTile(title: Text('${o.id} • ${o.customer}'), subtitle: Text('${o.area(state.isArabic)} • ${o.service}'), trailing: badge(stageLabel(o.stage, state.isArabic), stageColor(o.stage))),
-          ]))),
+          Card(
+              child: Padding(
+                  padding: const EdgeInsets.all(22),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(state.t('Bookings overview', 'نظرة على الحجوزات'),
+                            style: Theme.of(context).textTheme.titleLarge),
+                        const SizedBox(height: 12),
+                        for (final o in state.orders.take(6))
+                          ListTile(
+                              title: Text('${o.id} • ${o.customer}'),
+                              subtitle: Text(
+                                  '${o.area(state.isArabic)} • ${o.service}'),
+                              trailing: badge(
+                                  stageLabel(o.stage, state.isArabic),
+                                  stageColor(o.stage))),
+                      ]))),
         if (role == Role.tailor)
-          Card(child: Padding(padding: const EdgeInsets.all(22), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(state.t('Assigned tailoring work', 'أعمال الخياطة المسندة'), style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            for (final o in mine.take(6)) ListTile(title: Text('${o.customer} • ${o.id}'), subtitle: Text('${o.service} • ${o.window}\n${o.notes}'), trailing: badge(stageLabel(o.stage, state.isArabic), stageColor(o.stage))),
-          ]))),
+          Card(
+              child: Padding(
+                  padding: const EdgeInsets.all(22),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                            state.t('Assigned tailoring work',
+                                'أعمال الخياطة المسندة'),
+                            style: Theme.of(context).textTheme.titleLarge),
+                        const SizedBox(height: 12),
+                        for (final o in mine.take(6))
+                          ListTile(
+                              title: Text('${o.customer} • ${o.id}'),
+                              subtitle: Text(
+                                  '${o.service} • ${o.window}\n${o.notes}'),
+                              trailing: badge(
+                                  stageLabel(o.stage, state.isArabic),
+                                  stageColor(o.stage))),
+                      ]))),
         if (role == Role.driver)
-          Card(child: Padding(padding: const EdgeInsets.all(22), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(state.t('Driver route', 'مسار السائق'), style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            for (final o in mine.take(6)) Padding(padding: const EdgeInsets.only(bottom: 12), child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFE4D7BC))), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${o.customer} • ${o.id}', style: const TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              Text(o.address),
-              const SizedBox(height: 10),
-              SelectableText(buildTrackingLink(o.id)),
-              const SizedBox(height: 10),
-              Wrap(spacing: 10, runSpacing: 10, children: [
-                OutlinedButton(onPressed: () async { await Clipboard.setData(ClipboardData(text: buildTrackingLink(o.id))); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.t('Tracking link copied.', 'تم نسخ رابط التتبع.')))); }, child: Text(state.t('Copy tracking link', 'نسخ رابط التتبع'))),
-                ElevatedButton(onPressed: () => launchUrl(Uri.parse('https://www.google.com/maps/search/?api=1&query=${o.lat},${o.lng}'), webOnlyWindowName: '_blank'), child: const Text('Google Maps')),
-              ]),
-            ]))),
-          ]))),
+          DriverOperationsPanel(state: state, orders: mine),
       ]),
     );
   }
+}
+
+
+
+
+class DriverOperationsPanel extends StatelessWidget {
+  const DriverOperationsPanel({super.key, required this.state, required this.orders});
+  final AppState state;
+  final List<Order> orders;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(state.t('Driver route', 'مسار السائق'),
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          if (orders.isEmpty)
+            Text(state.t('No active driver orders.', 'لا توجد طلبات نشطة للسائق.')),
+          for (final order in orders.take(8))
+            workflowOrderCard(context, state, order, actions: [
+              OutlinedButton.icon(
+                onPressed: () => _copyTracking(context, order),
+                icon: const Icon(Icons.copy),
+                label: Text(state.t('Copy tracking', 'نسخ التتبع')),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => launchUrl(
+                  Uri.parse(
+                      'https://www.google.com/maps/search/?api=1&query=${order.lat},${order.lng}'),
+                  webOnlyWindowName: '_blank',
+                ),
+                icon: const Icon(Icons.map_outlined),
+                label: const Text('Google Maps'),
+              ),
+              if (!order.hasReceptionist)
+                OutlinedButton.icon(
+                  onPressed: () => _selectReceptionist(context, order),
+                  icon: const Icon(Icons.support_agent),
+                  label: Text(state.t('Select receptionist', 'اختيار موظف الاستقبال')),
+                ),
+              if (order.stage != Stage.onWay && order.stage != Stage.delivered)
+                ElevatedButton.icon(
+                  onPressed: () => _setStage(context, order, Stage.onWay,
+                      'Driver marked order dispatched'),
+                  icon: const Icon(Icons.route),
+                  label: Text(state.t('Dispatched', 'تم الإرسال')),
+                ),
+              if (order.stage != Stage.delivered)
+                ElevatedButton.icon(
+                  onPressed: () => _setStage(context, order, Stage.delivered,
+                      'Driver marked order delivered'),
+                  icon: const Icon(Icons.done_all),
+                  label: Text(state.t('Delivered', 'تم التسليم')),
+                ),
+            ]),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _copyTracking(BuildContext context, Order order) async {
+    await Clipboard.setData(ClipboardData(text: buildTrackingLink(order.id)));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Tracking link copied.', 'تم نسخ رابط التتبع.'))));
+    }
+  }
+
+  Future<void> _selectReceptionist(BuildContext context, Order order) async {
+    final receptionist = await showStaffSelectionDialog(
+      context,
+      state,
+      title: state.t('Select receptionist', 'اختيار موظف الاستقبال'),
+      label: state.t('Receptionist', 'الاستقبال'),
+      items: staffReceptionists,
+      initialValue: order.hasReceptionist ? order.receptionist : null,
+    );
+    if (receptionist == null) return;
+    await state.updateOrder(
+      order.id,
+      receptionist: receptionist,
+      timelineNote: 'Driver selected receptionist $receptionist',
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Receptionist saved.', 'تم حفظ موظف الاستقبال.'))));
+    }
+  }
+
+  Future<void> _setStage(
+      BuildContext context, Order order, Stage stage, String timelineNote) async {
+    await state.updateOrder(order.id, stage: stage, timelineNote: timelineNote);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Order status updated.', 'تم تحديث حالة الطلب.'))));
+    }
+  }
+}
+
+class ReceptionAssignment {
+  const ReceptionAssignment(this.branch, this.receptionist);
+  final String branch;
+  final String receptionist;
+}
+
+class ReceptionistSupervisorDashboard extends StatelessWidget {
+  const ReceptionistSupervisorDashboard(
+      {super.key, required this.state, required this.role});
+  final AppState state;
+  final Role role;
+
+  @override
+  Widget build(BuildContext context) {
+    final pendingBranch = state.orders
+        .where((o) => o.stage != Stage.delivered && !o.hasBranch)
+        .toList();
+    final active = state.orders.where((o) => o.stage != Stage.delivered).toList();
+    return Shell(
+      state: state,
+      role: role,
+      title: state.t('Reception supervisor receives new booking notifications.',
+          'مشرف الاستقبال يستقبل تنبيهات الحجوزات الجديدة.'),
+      subtitle: state.t(
+          'Assign the branch first, then optionally select the receptionist for the order.',
+          'عيّن الفرع أولاً، ثم اختر موظف الاستقبال للطلب إذا كان معروفاً.'),
+      body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 16, runSpacing: 16, children: [
+          metric(state.t('New notifications', 'تنبيهات جديدة'), '${pendingBranch.length}'),
+          metric(state.t('Active orders', 'الطلبات النشطة'), '${active.length}'),
+          metric(state.t('Branches', 'الفروع'), '${adminBranches.length}'),
+        ]),
+        const SizedBox(height: 18),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(state.t('Branch assignment queue', 'قائمة تعيين الفروع'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              if (pendingBranch.isEmpty)
+                Text(state.t('No new bookings waiting for branch assignment.',
+                    'لا توجد حجوزات جديدة بانتظار تعيين الفرع.')),
+              for (final order in pendingBranch)
+                workflowOrderCard(context, state, order, actions: [
+                  ElevatedButton.icon(
+                    onPressed: () => _assignBranch(context, order),
+                    icon: const Icon(Icons.storefront),
+                    label: Text(state.t('Assign branch', 'تعيين الفرع')),
+                  ),
+                ]),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Future<void> _assignBranch(BuildContext context, Order order) async {
+    final assignment = await showReceptionAssignmentDialog(context, state, order);
+    if (assignment == null) return;
+    await state.updateOrder(
+      order.id,
+      branch: assignment.branch,
+      receptionist: assignment.receptionist,
+      stage: Stage.branchAssigned,
+      timelineNote: 'Branch assigned to ${assignment.branch}',
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Branch assignment saved.', 'تم حفظ تعيين الفرع.'))));
+    }
+  }
+}
+
+class DriverSupervisorDashboard extends StatelessWidget {
+  const DriverSupervisorDashboard(
+      {super.key, required this.state, required this.role});
+  final AppState state;
+  final Role role;
+
+  @override
+  Widget build(BuildContext context) {
+    final driverQueue = state.orders
+        .where((o) => o.stage != Stage.delivered && o.hasBranch && !o.hasDriver)
+        .toList();
+    final assigned = state.orders
+        .where((o) => o.stage != Stage.delivered && o.hasDriver)
+        .toList();
+    return Shell(
+      state: state,
+      role: role,
+      title: state.t('Driver supervisor is notified after branch assignment.',
+          'مشرف السائقين يستقبل التنبيه بعد تعيين الفرع.'),
+      subtitle: state.t(
+          'Assign the driver and move the order to Driver assigned status.',
+          'عيّن السائق وانقل الطلب إلى حالة تم تعيين السائق.'),
+      body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 16, runSpacing: 16, children: [
+          metric(state.t('Ready for driver', 'جاهز لتعيين السائق'), '${driverQueue.length}'),
+          metric(state.t('Assigned drivers', 'السائقون المعينون'), '${assigned.length}'),
+          metric(state.t('Active orders', 'الطلبات النشطة'),
+              '${state.orders.where((o) => o.stage != Stage.delivered).length}'),
+        ]),
+        const SizedBox(height: 18),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(state.t('Driver assignment queue', 'قائمة تعيين السائقين'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              if (driverQueue.isEmpty)
+                Text(state.t('No branch-assigned orders waiting for a driver.',
+                    'لا توجد طلبات بفروع معينة بانتظار السائق.')),
+              for (final order in driverQueue)
+                workflowOrderCard(context, state, order, actions: [
+                  ElevatedButton.icon(
+                    onPressed: () => _assignDriver(context, order),
+                    icon: const Icon(Icons.local_shipping),
+                    label: Text(state.t('Assign driver', 'تعيين السائق')),
+                  ),
+                ]),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Future<void> _assignDriver(BuildContext context, Order order) async {
+    final driver = await showStaffSelectionDialog(
+      context,
+      state,
+      title: state.t('Assign driver', 'تعيين السائق'),
+      label: state.t('Driver', 'السائق'),
+      items: staffDrivers,
+      initialValue: order.hasDriver ? order.driver : null,
+    );
+    if (driver == null) return;
+    await state.updateOrder(
+      order.id,
+      driver: driver,
+      stage: Stage.assigned,
+      timelineNote: 'Driver assigned to $driver',
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Driver assignment saved.', 'تم حفظ تعيين السائق.'))));
+    }
+  }
+}
+
+class ReceptionistDashboard extends StatelessWidget {
+  const ReceptionistDashboard({super.key, required this.state, required this.role});
+  final AppState state;
+  final Role role;
+
+  @override
+  Widget build(BuildContext context) {
+    final branchOrders = state.orders
+        .where((o) => o.stage != Stage.delivered && o.hasBranch)
+        .toList();
+    final ready = branchOrders.where((o) => o.stage == Stage.ready).length;
+    return Shell(
+      state: state,
+      role: role,
+      title: state.t('Receptionist can prepare branch-assigned orders.',
+          'موظف الاستقبال يجهز الطلبات المعينة للفرع.'),
+      subtitle: state.t(
+          'Mark orders as Ready when the branch work is complete.',
+          'حوّل الطلب إلى جاهز عند اكتمال العمل في الفرع.'),
+      body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 16, runSpacing: 16, children: [
+          metric(state.t('Branch orders', 'طلبات الفرع'), '${branchOrders.length}'),
+          metric(state.t('Ready', 'جاهز'), '$ready'),
+          metric(state.t('Need action', 'تحتاج إجراء'), '${branchOrders.length - ready}'),
+        ]),
+        const SizedBox(height: 18),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(state.t('Reception work queue', 'قائمة عمل الاستقبال'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              if (branchOrders.isEmpty)
+                Text(state.t('No branch-assigned orders yet.',
+                    'لا توجد طلبات معينة لفرع حتى الآن.')),
+              for (final order in branchOrders)
+                workflowOrderCard(context, state, order, actions: [
+                  if (order.stage != Stage.ready)
+                    ElevatedButton.icon(
+                      onPressed: () => _markReady(context, order),
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: Text(state.t('Mark ready', 'تحديد جاهز')),
+                    ),
+                ]),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Future<void> _markReady(BuildContext context, Order order) async {
+    await state.updateOrder(
+      order.id,
+      stage: Stage.ready,
+      timelineNote: 'Reception marked order ready',
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Order marked ready.', 'تم تحويل الطلب إلى جاهز.'))));
+    }
+  }
+}
+
+Widget workflowOrderCard(BuildContext context, AppState state, Order order,
+    {List<Widget> actions = const []}) {
+  return Container(
+    margin: const EdgeInsets.only(bottom: 12),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: const Color(0xFFE4D7BC)),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('${order.customer} • ${order.id}',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          badge(stageLabel(order.stage, state.isArabic), stageColor(order.stage)),
+        ],
+      ),
+      const SizedBox(height: 8),
+      Text('${order.area(state.isArabic)} • ${order.window}'),
+      const SizedBox(height: 6),
+      Text(order.address),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        Chip(label: Text('${state.t('Branch', 'الفرع')}: ${order.branch}')),
+        Chip(label: Text('${state.t('Receptionist', 'الاستقبال')}: ${order.receptionist}')),
+        Chip(label: Text('${state.t('Driver', 'السائق')}: ${order.driver}')),
+      ]),
+      if (actions.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        Wrap(spacing: 10, runSpacing: 10, children: actions),
+      ],
+    ]),
+  );
+}
+
+Future<ReceptionAssignment?> showReceptionAssignmentDialog(
+    BuildContext context, AppState state, Order order) {
+  var branch = order.hasBranch ? order.branch : adminBranches.first.name;
+  const pending = 'Pending assignment';
+  var receptionist = order.hasReceptionist ? order.receptionist : pending;
+  final receptionistItems = [pending, ...staffReceptionists];
+  return showDialog<ReceptionAssignment>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text(state.t('Assign branch and receptionist',
+            'تعيين الفرع وموظف الاستقبال')),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String>(
+              value: branch,
+              decoration: InputDecoration(labelText: state.t('Branch', 'الفرع')),
+              items: [
+                for (final item in adminBranches)
+                  DropdownMenuItem(value: item.name, child: Text(item.name)),
+              ],
+              onChanged: (value) => setDialogState(() => branch = value ?? branch),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: receptionist,
+              decoration: InputDecoration(
+                  labelText: state.t('Receptionist optional', 'موظف الاستقبال اختياري')),
+              items: [
+                for (final item in receptionistItems)
+                  DropdownMenuItem(value: item, child: Text(item)),
+              ],
+              onChanged: (value) =>
+                  setDialogState(() => receptionist = value ?? receptionist),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(state.t('Cancel', 'إلغاء')),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext)
+                .pop(ReceptionAssignment(branch, receptionist)),
+            child: Text(state.t('Save', 'حفظ')),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<String?> showStaffSelectionDialog(
+  BuildContext context,
+  AppState state, {
+  required String title,
+  required String label,
+  required List<String> items,
+  String? initialValue,
+}) {
+  var selected = items.contains(initialValue) ? initialValue! : items.first;
+  return showDialog<String>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text(title),
+        content: DropdownButtonFormField<String>(
+          value: selected,
+          decoration: InputDecoration(labelText: label),
+          items: [
+            for (final item in items)
+              DropdownMenuItem(value: item, child: Text(item)),
+          ],
+          onChanged: (value) => setDialogState(() => selected = value ?? selected),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(state.t('Cancel', 'إلغاء')),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(selected),
+            child: Text(state.t('Save', 'حفظ')),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class AdminDashboard extends StatefulWidget {
@@ -1181,9 +2435,35 @@ class _AdminDashboardState extends State<AdminDashboard> {
   late final TextEditingController policyArDetailController;
   late final List<PolicyRecord> policies;
   late final List<TextEditingController> capacityControllers;
-  final List<String> dayKeys = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  final List<String> slotKeys = ['12pm', '1pm', '2pm', '3pm', '4pm', '5pm', '6pm', '7pm', '8pm'];
-  Set<String> workingDays = {'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'};
+  final List<String> dayKeys = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday'
+  ];
+  final List<String> slotKeys = [
+    '12pm',
+    '1pm',
+    '2pm',
+    '3pm',
+    '4pm',
+    '5pm',
+    '6pm',
+    '7pm',
+    '8pm'
+  ];
+  Set<String> workingDays = {
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday'
+  };
   int selectedPolicyIndex = 0;
 
   AppState get s => widget.state;
@@ -1192,15 +2472,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
   void initState() {
     super.initState();
     appointmentEnabled = true;
-    slotListController = TextEditingController(text: '12pm,1pm,2pm,3pm,4pm,5pm,6pm,7pm,8pm');
-    dateRangeController = TextEditingController(text: '29-07-2026 to 31-07-2026');
+    slotListController =
+        TextEditingController(text: '12pm,1pm,2pm,3pm,4pm,5pm,6pm,7pm,8pm');
+    dateRangeController =
+        TextEditingController(text: '29-07-2026 to 31-07-2026');
     branchSearchController = TextEditingController();
     policies = List<PolicyRecord>.from(adminPolicies);
     policyEnNameController = TextEditingController();
     policyArNameController = TextEditingController();
     policyEnDetailController = TextEditingController();
     policyArDetailController = TextEditingController();
-    capacityControllers = [for (final _ in slotKeys) TextEditingController(text: '0')];
+    capacityControllers = [
+      for (final _ in slotKeys) TextEditingController(text: '0')
+    ];
     _loadPolicy(0);
     branchSearchController.addListener(() => setState(() {}));
   }
@@ -1226,47 +2510,70 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Shell(
       state: s,
       role: Role.admin,
-      title: s.t('Admin dashboard with booking schedule, branches and policy settings.', 'لوحة الإدارة مع إعدادات جدول الحجوزات والفروع والسياسات.'),
-      subtitle: s.t('This admin route now includes the same settings structure you showed: scheduling, branch management and bilingual policy editing.', 'هذا الرابط الإداري يتضمن الآن نفس هيكل الإعدادات الذي عرضته: الجدولة وإدارة الفروع وتحرير السياسات باللغتين.'),
+      title: s.t(
+          'Admin dashboard with booking schedule, branches and policy settings.',
+          'لوحة الإدارة مع إعدادات جدول الحجوزات والفروع والسياسات.'),
+      subtitle: s.t(
+          'This admin route now includes the same settings structure you showed: scheduling, branch management and bilingual policy editing.',
+          'هذا الرابط الإداري يتضمن الآن نفس هيكل الإعدادات الذي عرضته: الجدولة وإدارة الفروع وتحرير السياسات باللغتين.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(s.t('All orders', 'كل الطلبات'), '${s.orders.length}'),
           metric(s.t('Active orders', 'الطلبات النشطة'), '$active'),
-          metric(s.t('Open complaints', 'الشكاوى المفتوحة'), '${complaints.length}'),
+          metric(s.t('Open complaints', 'الشكاوى المفتوحة'),
+              '${complaints.length}'),
           metric(s.t('Branches', 'الفروع'), '${adminBranches.length}'),
         ]),
         const SizedBox(height: 18),
-        Card(child: Padding(padding: const EdgeInsets.all(22), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Wrap(spacing: 10, runSpacing: 10, children: [
-            sectionChip(s.t('Dashboard', 'لوحة التحكم')),
-            sectionChip(s.t('Booking Schedule', 'جدول الحجوزات')),
-            sectionChip(s.t('Branches', 'الفروع')),
-            sectionChip(s.t('Policies', 'السياسات')),
-          ]),
-          const SizedBox(height: 14),
-          Text(s.t('Bookings overview', 'نظرة على الحجوزات'), style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          for (final o in s.orders.take(6)) ListTile(title: Text('${o.id} • ${o.customer}'), subtitle: Text('${o.area(s.isArabic)} • ${o.service}'), trailing: badge(stageLabel(o.stage, s.isArabic), stageColor(o.stage))),
-        ]))),
+        Card(
+            child: Padding(
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(spacing: 10, runSpacing: 10, children: [
+                        sectionChip(s.t('Dashboard', 'لوحة التحكم')),
+                        sectionChip(s.t('Booking Schedule', 'جدول الحجوزات')),
+                        sectionChip(s.t('Branches', 'الفروع')),
+                        sectionChip(s.t('Policies', 'السياسات')),
+                      ]),
+                      const SizedBox(height: 14),
+                      Text(s.t('Bookings overview', 'نظرة على الحجوزات'),
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      for (final o in s.orders.take(6))
+                        ListTile(
+                            title: Text('${o.id} • ${o.customer}'),
+                            subtitle:
+                                Text('${o.area(s.isArabic)} • ${o.service}'),
+                            trailing: badge(stageLabel(o.stage, s.isArabic),
+                                stageColor(o.stage))),
+                    ]))),
         const SizedBox(height: 18),
         adminCard(
           context,
           title: s.t('Booking Schedule', 'جدول الحجوزات'),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             settingsBlock(
               context,
               title: s.t('Appointment Module', 'وحدة المواعيد'),
-              action: smallSaveButton(() => notifySaved(s.t('Appointment module saved.', 'تم حفظ إعداد وحدة المواعيد.'))),
+              action: smallSaveButton(() => notifySaved(s.t(
+                  'Appointment module saved.', 'تم حفظ إعداد وحدة المواعيد.'))),
               child: SizedBox(
                 width: 220,
                 child: DropdownButtonFormField<bool>(
                   value: appointmentEnabled,
-                  decoration: InputDecoration(labelText: s.t('Module status', 'حالة الوحدة')),
+                  decoration: InputDecoration(
+                      labelText: s.t('Module status', 'حالة الوحدة')),
                   items: [
-                    DropdownMenuItem(value: true, child: Text(s.t('ON', 'تشغيل'))),
-                    DropdownMenuItem(value: false, child: Text(s.t('OFF', 'إيقاف'))),
+                    DropdownMenuItem(
+                        value: true, child: Text(s.t('ON', 'تشغيل'))),
+                    DropdownMenuItem(
+                        value: false, child: Text(s.t('OFF', 'إيقاف'))),
                   ],
-                  onChanged: (value) => setState(() => appointmentEnabled = value ?? true),
+                  onChanged: (value) =>
+                      setState(() => appointmentEnabled = value ?? true),
                 ),
               ),
             ),
@@ -1274,24 +2581,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
             settingsBlock(
               context,
               title: s.t('Time Slots', 'الفترات الزمنية'),
-              action: smallSaveButton(() => notifySaved(s.t('Time slots saved.', 'تم حفظ الفترات الزمنية.'))),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                SizedBox(
-                  width: 420,
-                  child: TextField(
-                    controller: slotListController,
-                    decoration: InputDecoration(labelText: s.t('Time slots', 'الفترات الزمنية'), hintText: '12pm,1pm,2pm,3pm'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(s.t('Note: once you save new time slots, the previous setup will be removed.', 'ملاحظة: عند حفظ الفترات الجديدة سيتم استبدال الإعداد السابق.'), style: const TextStyle(color: Colors.black54)),
-              ]),
+              action: smallSaveButton(() => notifySaved(
+                  s.t('Time slots saved.', 'تم حفظ الفترات الزمنية.'))),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 420,
+                      child: TextField(
+                        controller: slotListController,
+                        decoration: InputDecoration(
+                            labelText: s.t('Time slots', 'الفترات الزمنية'),
+                            hintText: '12pm,1pm,2pm,3pm'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                        s.t('Note: once you save new time slots, the previous setup will be removed.',
+                            'ملاحظة: عند حفظ الفترات الجديدة سيتم استبدال الإعداد السابق.'),
+                        style: const TextStyle(color: Colors.black54)),
+                  ]),
             ),
             const SizedBox(height: 16),
             settingsBlock(
               context,
               title: s.t('Working Days', 'أيام العمل'),
-              action: smallSaveButton(() => notifySaved(s.t('Working days saved.', 'تم حفظ أيام العمل.'))),
+              action: smallSaveButton(() => notifySaved(
+                  s.t('Working days saved.', 'تم حفظ أيام العمل.'))),
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -1303,7 +2619,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         dense: true,
                         contentPadding: EdgeInsets.zero,
                         value: workingDays.contains(day),
-                        title: Text(dayLabel(day), style: const TextStyle(fontSize: 13)),
+                        title: Text(dayLabel(day),
+                            style: const TextStyle(fontSize: 13)),
                         onChanged: (value) {
                           setState(() {
                             if (value ?? false) {
@@ -1322,24 +2639,48 @@ class _AdminDashboardState extends State<AdminDashboard> {
             settingsBlock(
               context,
               title: s.t('Capacity Generator', 'توليد السعة'),
-              action: OutlinedButton(onPressed: () => notifySaved(s.t('Rows generated for working days.', 'تم إنشاء الصفوف لأيام العمل.')), child: Text(s.t('Continue', 'متابعة'))),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(s.t('Select a date range and click Continue to generate rows.', 'اختر نطاق التاريخ ثم اضغط متابعة لإنشاء الصفوف.'), style: const TextStyle(color: Colors.black54)),
-                const SizedBox(height: 12),
-                Wrap(spacing: 12, runSpacing: 12, children: [
-                  SizedBox(width: 240, child: TextField(controller: dateRangeController, decoration: InputDecoration(labelText: s.t('Date range', 'نطاق التاريخ')))),
-                  for (var i = 0; i < slotKeys.length; i++)
-                    SizedBox(width: 105, child: TextField(controller: capacityControllers[i], decoration: InputDecoration(labelText: slotKeys[i]))),
-                ]),
-                const SizedBox(height: 10),
-                Text(s.t('Note: only working days will be generated.', 'ملاحظة: سيتم إنشاء أيام العمل فقط.'), style: const TextStyle(color: Colors.black54)),
-              ]),
+              action: OutlinedButton(
+                  onPressed: () => notifySaved(s.t(
+                      'Rows generated for working days.',
+                      'تم إنشاء الصفوف لأيام العمل.')),
+                  child: Text(s.t('Continue', 'متابعة'))),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        s.t('Select a date range and click Continue to generate rows.',
+                            'اختر نطاق التاريخ ثم اضغط متابعة لإنشاء الصفوف.'),
+                        style: const TextStyle(color: Colors.black54)),
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 12, runSpacing: 12, children: [
+                      SizedBox(
+                          width: 240,
+                          child: TextField(
+                              controller: dateRangeController,
+                              decoration: InputDecoration(
+                                  labelText:
+                                      s.t('Date range', 'نطاق التاريخ')))),
+                      for (var i = 0; i < slotKeys.length; i++)
+                        SizedBox(
+                            width: 105,
+                            child: TextField(
+                                controller: capacityControllers[i],
+                                decoration:
+                                    InputDecoration(labelText: slotKeys[i]))),
+                    ]),
+                    const SizedBox(height: 10),
+                    Text(
+                        s.t('Note: only working days will be generated.',
+                            'ملاحظة: سيتم إنشاء أيام العمل فقط.'),
+                        style: const TextStyle(color: Colors.black54)),
+                  ]),
             ),
             const SizedBox(height: 16),
             settingsBlock(
               context,
               title: s.t('Existing Schedule Records', 'سجلات الجدول الحالية'),
-              action: smallSaveButton(() => notifySaved(s.t('Schedule records saved.', 'تم حفظ سجلات الجدول.'))),
+              action: smallSaveButton(() => notifySaved(
+                  s.t('Schedule records saved.', 'تم حفظ سجلات الجدول.'))),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
@@ -1353,7 +2694,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       DataRow(cells: [
                         DataCell(Text(row.date)),
                         DataCell(Text(s.isArabic ? row.dayAr : row.dayEn)),
-                        for (final count in row.capacities) DataCell(SizedBox(width: 44, child: TextField(controller: TextEditingController(text: '$count'), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8))))),
+                        for (final count in row.capacities)
+                          DataCell(SizedBox(
+                              width: 44,
+                              child: TextField(
+                                  controller:
+                                      TextEditingController(text: '$count'),
+                                  decoration: const InputDecoration(
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 8))))),
                       ]),
                   ],
                 ),
@@ -1366,8 +2716,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
           context,
           title: s.t('Branches', 'الفروع'),
           action: Wrap(spacing: 10, runSpacing: 10, children: [
-            SizedBox(width: 220, child: TextField(controller: branchSearchController, decoration: InputDecoration(labelText: s.t('Search', 'بحث')))),
-            ElevatedButton(onPressed: () => notifySaved(s.t('Add branch flow is ready.', 'نموذج إضافة الفرع جاهز.')), child: Text(s.t('Add Branch', 'إضافة فرع'))),
+            SizedBox(
+                width: 220,
+                child: TextField(
+                    controller: branchSearchController,
+                    decoration:
+                        InputDecoration(labelText: s.t('Search', 'بحث')))),
+            ElevatedButton(
+                onPressed: () => notifySaved(s.t(
+                    'Add branch flow is ready.', 'نموذج إضافة الفرع جاهز.')),
+                child: Text(s.t('Add Branch', 'إضافة فرع'))),
           ]),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -1384,10 +2742,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 for (final branch in filteredBranches)
                   DataRow(cells: [
                     DataCell(Text(branch.name)),
-                    DataCell(SizedBox(width: 210, child: Text(branch.locationLink, overflow: TextOverflow.ellipsis))),
+                    DataCell(SizedBox(
+                        width: 210,
+                        child: Text(branch.locationLink,
+                            overflow: TextOverflow.ellipsis))),
                     DataCell(SizedBox(width: 220, child: Text(branch.hours))),
                     DataCell(Text(branch.contact)),
-                    DataCell(Text(s.isArabic ? branch.statusAr : branch.statusEn)),
+                    DataCell(
+                        Text(s.isArabic ? branch.statusAr : branch.statusEn)),
                     DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
                       tinyActionButton(s.t('Edit', 'تعديل')),
                       const SizedBox(width: 6),
@@ -1402,12 +2764,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
         adminCard(
           context,
           title: s.t('Edit Policy', 'تعديل السياسة'),
-          action: OutlinedButton(onPressed: () => notifySaved(s.t('Back to policy list.', 'العودة إلى قائمة السياسات.')), child: Text(s.t('Back to list', 'العودة للقائمة'))),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          action: OutlinedButton(
+              onPressed: () => notifySaved(
+                  s.t('Back to policy list.', 'العودة إلى قائمة السياسات.')),
+              child: Text(s.t('Back to list', 'العودة للقائمة'))),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Wrap(spacing: 10, runSpacing: 10, children: [
               for (var i = 0; i < policies.length; i++)
                 ChoiceChip(
-                  label: Text(s.isArabic ? policies[i].nameAr : policies[i].nameEn),
+                  label: Text(
+                      s.isArabic ? policies[i].nameAr : policies[i].nameEn),
                   selected: selectedPolicyIndex == i,
                   selectedColor: const Color(0xFFFFF1CF),
                   onSelected: (_) => setState(() => _loadPolicy(i)),
@@ -1417,19 +2784,43 @@ class _AdminDashboardState extends State<AdminDashboard> {
             Wrap(spacing: 16, runSpacing: 16, children: [
               SizedBox(
                 width: 480,
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  TextField(controller: policyEnNameController, decoration: InputDecoration(labelText: s.t('Policy Name (English)', 'اسم السياسة بالإنجليزية'))),
-                  const SizedBox(height: 12),
-                  TextField(controller: policyEnDetailController, maxLines: 16, decoration: InputDecoration(labelText: s.t('Detail (English)', 'التفاصيل بالإنجليزية'))),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                          controller: policyEnNameController,
+                          decoration: InputDecoration(
+                              labelText: s.t('Policy Name (English)',
+                                  'اسم السياسة بالإنجليزية'))),
+                      const SizedBox(height: 12),
+                      TextField(
+                          controller: policyEnDetailController,
+                          maxLines: 16,
+                          decoration: InputDecoration(
+                              labelText: s.t(
+                                  'Detail (English)', 'التفاصيل بالإنجليزية'))),
+                    ]),
               ),
               SizedBox(
                 width: 480,
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  TextField(controller: policyArNameController, textAlign: TextAlign.right, decoration: InputDecoration(labelText: s.t('Policy Name (Arabic)', 'اسم السياسة بالعربية'))),
-                  const SizedBox(height: 12),
-                  TextField(controller: policyArDetailController, textAlign: TextAlign.right, maxLines: 16, decoration: InputDecoration(labelText: s.t('Detail (Arabic)', 'التفاصيل بالعربية'))),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                          controller: policyArNameController,
+                          textAlign: TextAlign.right,
+                          decoration: InputDecoration(
+                              labelText: s.t('Policy Name (Arabic)',
+                                  'اسم السياسة بالعربية'))),
+                      const SizedBox(height: 12),
+                      TextField(
+                          controller: policyArDetailController,
+                          textAlign: TextAlign.right,
+                          maxLines: 16,
+                          decoration: InputDecoration(
+                              labelText:
+                                  s.t('Detail (Arabic)', 'التفاصيل بالعربية'))),
+                    ]),
               ),
             ]),
             const SizedBox(height: 16),
@@ -1473,7 +2864,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   void notifySaved(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   String dayLabel(String day) => switch (day) {
@@ -1489,7 +2881,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
 }
 
 class BranchRecord {
-  const BranchRecord({required this.name, required this.locationLink, required this.hours, required this.contact, required this.statusEn, required this.statusAr});
+  const BranchRecord(
+      {required this.name,
+      required this.locationLink,
+      required this.hours,
+      required this.contact,
+      required this.statusEn,
+      required this.statusAr});
   final String name;
   final String locationLink;
   final String hours;
@@ -1499,7 +2897,11 @@ class BranchRecord {
 }
 
 class PolicyRecord {
-  const PolicyRecord({required this.nameEn, required this.nameAr, required this.detailEn, required this.detailAr});
+  const PolicyRecord(
+      {required this.nameEn,
+      required this.nameAr,
+      required this.detailEn,
+      required this.detailAr});
   final String nameEn;
   final String nameAr;
   final String detailEn;
@@ -1507,7 +2909,11 @@ class PolicyRecord {
 }
 
 class ScheduleRow {
-  const ScheduleRow({required this.date, required this.dayEn, required this.dayAr, required this.capacities});
+  const ScheduleRow(
+      {required this.date,
+      required this.dayEn,
+      required this.dayAr,
+      required this.capacities});
   final String date;
   final String dayEn;
   final String dayAr;
@@ -1515,108 +2921,235 @@ class ScheduleRow {
 }
 
 const adminBranches = <BranchRecord>[
-  BranchRecord(name: 'Al-Yarmouk', locationLink: 'https://maps.app.goo.gl/zX2gUzzkbY1vwcj58', hours: 'Our Yarmouk branch is currently closed until further notice. You can collect your orders from our Hessa Al Mubarak branch.', contact: '98700133', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'AlHamra Tower - Premium', locationLink: 'https://maps.app.goo.gl/CrwaAmhQ4QhxB7CF7', hours: '10 am to 10 pm', contact: '99170282', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'City Hypermarket - Dasma', locationLink: 'https://maps.app.goo.gl/Cr2GAN4Qfm1RpDV98', hours: '10 am to 10 pm', contact: '99798454', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'Hessa AlMubarak District', locationLink: 'https://maps.app.goo.gl/tWoboCr2EhEWQYXPA', hours: '24 / 7', contact: '96957896', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'Promenade Mall - Hawally', locationLink: 'https://maps.app.goo.gl/8KiTZcs4Sc3ByYdQ6', hours: '10 am to 10 pm', contact: '98774155', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'Qortuba', locationLink: 'https://maps.app.goo.gl/imbpgBzihkcw2VpFA', hours: '10 am to 10 pm', contact: '98740699', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'The Avenues - Al Rai', locationLink: 'https://maps.app.goo.gl/oLSD2Kh8WFmvgmFq7', hours: '10 am to 10 pm', contact: '98716137', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'West Mishref', locationLink: 'https://maps.app.goo.gl/FdfvesvAtDAo8DzP6', hours: '10 am to 10 pm', contact: '98741904', statusEn: 'Active', statusAr: 'نشط'),
-  BranchRecord(name: 'Zahra Complex - Salmiya', locationLink: 'https://maps.app.goo.gl/QdFCcnhsYDcUkS22A', hours: '10 am to 10 pm', contact: '98765532', statusEn: 'Active', statusAr: 'نشط'),
+  BranchRecord(
+      name: 'Al-Yarmouk',
+      locationLink: 'https://maps.app.goo.gl/zX2gUzzkbY1vwcj58',
+      hours:
+          'Our Yarmouk branch is currently closed until further notice. You can collect your orders from our Hessa Al Mubarak branch.',
+      contact: '98700133',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'AlHamra Tower - Premium',
+      locationLink: 'https://maps.app.goo.gl/CrwaAmhQ4QhxB7CF7',
+      hours: '10 am to 10 pm',
+      contact: '99170282',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'City Hypermarket - Dasma',
+      locationLink: 'https://maps.app.goo.gl/Cr2GAN4Qfm1RpDV98',
+      hours: '10 am to 10 pm',
+      contact: '99798454',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'Hessa AlMubarak District',
+      locationLink: 'https://maps.app.goo.gl/tWoboCr2EhEWQYXPA',
+      hours: '24 / 7',
+      contact: '96957896',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'Promenade Mall - Hawally',
+      locationLink: 'https://maps.app.goo.gl/8KiTZcs4Sc3ByYdQ6',
+      hours: '10 am to 10 pm',
+      contact: '98774155',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'Qortuba',
+      locationLink: 'https://maps.app.goo.gl/imbpgBzihkcw2VpFA',
+      hours: '10 am to 10 pm',
+      contact: '98740699',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'The Avenues - Al Rai',
+      locationLink: 'https://maps.app.goo.gl/oLSD2Kh8WFmvgmFq7',
+      hours: '10 am to 10 pm',
+      contact: '98716137',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'West Mishref',
+      locationLink: 'https://maps.app.goo.gl/FdfvesvAtDAo8DzP6',
+      hours: '10 am to 10 pm',
+      contact: '98741904',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
+  BranchRecord(
+      name: 'Zahra Complex - Salmiya',
+      locationLink: 'https://maps.app.goo.gl/QdFCcnhsYDcUkS22A',
+      hours: '10 am to 10 pm',
+      contact: '98765532',
+      statusEn: 'Active',
+      statusAr: 'نشط'),
 ];
 
 const adminPolicies = <PolicyRecord>[
   PolicyRecord(
     nameEn: 'Alteration & Repair',
     nameAr: 'التعديلات والإصلاحات',
-    detailEn: 'Alterations and repairs change the original form of the clothing.\n\nRepaired or altered items cannot be reverted to the original model.\n\nThere may be changes that the customer may not anticipate in their requests due to their lack of expertise in tailoring.\n\nCustomers may review items upon cancellation and are entitled to one free minor adjustment to the same service.',
-    detailAr: 'التعديلات والإصلاحات تؤدي إلى تغيير الشكل الأصلي للقطعة.\n\nلا يمكن إعادة القطع المعدلة أو المصلحة إلى حالتها أو تصميمها الأصلي.\n\nنظراً للطبيعة الفنية لأعمال الخياطة قد تطرأ بعض التغييرات التي قد لا يتوقعها العميل بسبب عدم الخبرة الفنية في هذا المجال.\n\nيحق للعميل معاينة القطعة عند الاستلام ويستحق تعديلاً بسيطاً واحداً مجانياً لنفس الخدمة.',
+    detailEn:
+        'Alterations and repairs change the original form of the clothing.\n\nRepaired or altered items cannot be reverted to the original model.\n\nThere may be changes that the customer may not anticipate in their requests due to their lack of expertise in tailoring.\n\nCustomers may review items upon cancellation and are entitled to one free minor adjustment to the same service.',
+    detailAr:
+        'التعديلات والإصلاحات تؤدي إلى تغيير الشكل الأصلي للقطعة.\n\nلا يمكن إعادة القطع المعدلة أو المصلحة إلى حالتها أو تصميمها الأصلي.\n\nنظراً للطبيعة الفنية لأعمال الخياطة قد تطرأ بعض التغييرات التي قد لا يتوقعها العميل بسبب عدم الخبرة الفنية في هذا المجال.\n\nيحق للعميل معاينة القطعة عند الاستلام ويستحق تعديلاً بسيطاً واحداً مجانياً لنفس الخدمة.',
   ),
   PolicyRecord(
     nameEn: 'Order Cancellation',
     nameAr: 'إلغاء الطلب',
-    detailEn: 'Acceptance of the invoice confirms the customer\'s agreement to all services, measurements, pricing, and policies.\n\nPayments are made in advance, and once tailoring or repair work has begun, order cancellations are not permitted.\n\nIn the event of service delays, cancellations are not allowed under any circumstances.',
-    detailAr: 'يعد قبول الفاتورة إقراراً من العميل بالموافقة على جميع الخدمات والمقاسات والأسعار والسياسات المعتمدة.\n\nتسدد الدفعات مقدماً، وبمجرد البدء في أعمال الخياطة أو الإصلاح، لا يسمح بإلغاء الطلب.\n\nفي حال حدوث أي تأخير في تنفيذ الخدمة، لا يسمح بالإلغاء تحت أي ظرف من الظروف.',
+    detailEn:
+        'Acceptance of the invoice confirms the customer\'s agreement to all services, measurements, pricing, and policies.\n\nPayments are made in advance, and once tailoring or repair work has begun, order cancellations are not permitted.\n\nIn the event of service delays, cancellations are not allowed under any circumstances.',
+    detailAr:
+        'يعد قبول الفاتورة إقراراً من العميل بالموافقة على جميع الخدمات والمقاسات والأسعار والسياسات المعتمدة.\n\nتسدد الدفعات مقدماً، وبمجرد البدء في أعمال الخياطة أو الإصلاح، لا يسمح بإلغاء الطلب.\n\nفي حال حدوث أي تأخير في تنفيذ الخدمة، لا يسمح بالإلغاء تحت أي ظرف من الظروف.',
   ),
   PolicyRecord(
     nameEn: 'Appointment Rescheduling',
     nameAr: 'إعادة جدولة المواعيد',
-    detailEn: 'For home services, the customer will receive a confirmation link to confirm the appointment.\n\nA fixed home services fee applies and is determined by location.\n\nAppointments may be cancelled or rescheduled only if the request is made at least 3 hours before the scheduled time.\n\nRequests made after this period will not be eligible for changes or fee refunds.',
-    detailAr: 'في حال طلب خدمة منزلية، سيستلم العميل رابط تأكيد لتأكيد الموعد.\n\nيتم تطبيق رسوم ثابتة للخدمة المنزلية، ويتم تحديدها حسب الموقع.\n\nيمكن إلغاء الموعد أو إعادة جدولة الموعد فقط في حال تقديم الطلب قبل 3 ساعات على الأقل من الوقت المحدد.\n\nالطلبات المقدمة بعد هذه المدة لن تكون مؤهلة للتعديل أو استرداد الرسوم.',
+    detailEn:
+        'For home services, the customer will receive a confirmation link to confirm the appointment.\n\nA fixed home services fee applies and is determined by location.\n\nAppointments may be cancelled or rescheduled only if the request is made at least 3 hours before the scheduled time.\n\nRequests made after this period will not be eligible for changes or fee refunds.',
+    detailAr:
+        'في حال طلب خدمة منزلية، سيستلم العميل رابط تأكيد لتأكيد الموعد.\n\nيتم تطبيق رسوم ثابتة للخدمة المنزلية، ويتم تحديدها حسب الموقع.\n\nيمكن إلغاء الموعد أو إعادة جدولة الموعد فقط في حال تقديم الطلب قبل 3 ساعات على الأقل من الوقت المحدد.\n\nالطلبات المقدمة بعد هذه المدة لن تكون مؤهلة للتعديل أو استرداد الرسوم.',
   ),
   PolicyRecord(
     nameEn: 'Delivery & Pickup',
     nameAr: 'التوصيل والاستلام',
-    detailEn: 'Customers are responsible for collecting their items from the company\'s branches once services are completed.\n\nThe expected completion time may range from 15 minutes to two weeks, depending on the type and volume of services, and timelines may change without prior notice due to circumstances beyond the company\'s control.\n\nThe company disclaims all responsibility for any items that are not collected within 7 days from the completion or notification date.',
-    detailAr: 'يتحمل العملاء مسؤولية استلام قطعهم من فروع الشركة بعد إتمام الخدمات.\n\nقد تتراوح مدة الإنجاز المتوقعة من 15 دقيقة إلى أسبوعين، وذلك بحسب نوع وحجم الخدمة، وقد تتغير المدة دون إشعار مسبق بسبب ظروف خارجة عن إرادة الشركة.\n\nتخلي الشركة مسؤوليتها عن أي قطع لم يتم استلامها خلال 7 أيام من تاريخ الإنجاز أو الإخطار.',
+    detailEn:
+        'Customers are responsible for collecting their items from the company\'s branches once services are completed.\n\nThe expected completion time may range from 15 minutes to two weeks, depending on the type and volume of services, and timelines may change without prior notice due to circumstances beyond the company\'s control.\n\nThe company disclaims all responsibility for any items that are not collected within 7 days from the completion or notification date.',
+    detailAr:
+        'يتحمل العملاء مسؤولية استلام قطعهم من فروع الشركة بعد إتمام الخدمات.\n\nقد تتراوح مدة الإنجاز المتوقعة من 15 دقيقة إلى أسبوعين، وذلك بحسب نوع وحجم الخدمة، وقد تتغير المدة دون إشعار مسبق بسبب ظروف خارجة عن إرادة الشركة.\n\nتخلي الشركة مسؤوليتها عن أي قطع لم يتم استلامها خلال 7 أيام من تاريخ الإنجاز أو الإخطار.',
   ),
   PolicyRecord(
     nameEn: 'Refund',
     nameAr: 'استرداد المبالغ',
-    detailEn: 'All service fees are non-refundable under any circumstances, including alterations, repairs, tailoring, delays, or unintentional damage.\n\nThe company does not provide compensation for the original value of items.\n\nHome service fees are also non-refundable, except in cases where the appointment is cancelled at least three hours before the scheduled time.',
-    detailAr: 'جميع رسوم الخدمات غير قابلة للاسترداد تحت أي ظرف من الظروف، بما في ذلك التعديلات، والإصلاحات، والخياطة، والتأخير، أو التلف غير المقصود.\n\nلا تتحمل الشركة مسؤولية أو تعويض القيمة الأصلية للقطع.\n\nرسوم الخدمة المنزلية غير قابلة للاسترداد أيضاً، باستثناء الحالات التي يتم فيها إلغاء الموعد قبل ثلاث ساعات على الأقل من الوقت المحدد.',
+    detailEn:
+        'All service fees are non-refundable under any circumstances, including alterations, repairs, tailoring, delays, or unintentional damage.\n\nThe company does not provide compensation for the original value of items.\n\nHome service fees are also non-refundable, except in cases where the appointment is cancelled at least three hours before the scheduled time.',
+    detailAr:
+        'جميع رسوم الخدمات غير قابلة للاسترداد تحت أي ظرف من الظروف، بما في ذلك التعديلات، والإصلاحات، والخياطة، والتأخير، أو التلف غير المقصود.\n\nلا تتحمل الشركة مسؤولية أو تعويض القيمة الأصلية للقطع.\n\nرسوم الخدمة المنزلية غير قابلة للاسترداد أيضاً، باستثناء الحالات التي يتم فيها إلغاء الموعد قبل ثلاث ساعات على الأقل من الوقت المحدد.',
   ),
 ];
 
 const scheduleRows = <ScheduleRow>[
-  ScheduleRow(date: '31-07-2026', dayEn: 'Fri', dayAr: 'الجمعة', capacities: [1, 2, 2, 2, 2, 2, 2, 2, 2]),
-  ScheduleRow(date: '30-07-2026', dayEn: 'Thu', dayAr: 'الخميس', capacities: [1, 2, 2, 2, 2, 2, 2, 2, 2]),
-  ScheduleRow(date: '29-07-2026', dayEn: 'Wed', dayAr: 'الأربعاء', capacities: [1, 1, 0, 0, 0, 0, 0, 0, 0]),
+  ScheduleRow(
+      date: '31-07-2026',
+      dayEn: 'Fri',
+      dayAr: 'الجمعة',
+      capacities: [1, 2, 2, 2, 2, 2, 2, 2, 2]),
+  ScheduleRow(
+      date: '30-07-2026',
+      dayEn: 'Thu',
+      dayAr: 'الخميس',
+      capacities: [1, 2, 2, 2, 2, 2, 2, 2, 2]),
+  ScheduleRow(
+      date: '29-07-2026',
+      dayEn: 'Wed',
+      dayAr: 'الأربعاء',
+      capacities: [1, 1, 0, 0, 0, 0, 0, 0, 0]),
 ];
 
-Widget adminCard(BuildContext context, {required String title, required Widget child, Widget? action}) => Card(
-  child: Padding(
-    padding: const EdgeInsets.all(22),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Wrap(alignment: WrapAlignment.spaceBetween, spacing: 12, runSpacing: 12, children: [
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
-        if (action != null) action,
-      ]),
-      const SizedBox(height: 14),
-      child,
-    ]),
-  ),
-);
+Widget adminCard(BuildContext context,
+        {required String title, required Widget child, Widget? action}) =>
+    Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.titleLarge),
+                if (action != null) action,
+              ]),
+          const SizedBox(height: 14),
+          child,
+        ]),
+      ),
+    );
 
-Widget settingsBlock(BuildContext context, {required String title, required Widget child, Widget? action}) => Container(
-  padding: const EdgeInsets.all(18),
-  decoration: BoxDecoration(
-    color: const Color(0xFFFFFCF7),
-    borderRadius: BorderRadius.circular(16),
-    border: Border.all(color: const Color(0xFFE6D9BE)),
-  ),
-  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Wrap(alignment: WrapAlignment.spaceBetween, spacing: 12, runSpacing: 12, children: [
-      Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-      if (action != null) action,
-    ]),
-    const SizedBox(height: 14),
-    child,
-  ]),
-);
+Widget settingsBlock(BuildContext context,
+        {required String title, required Widget child, Widget? action}) =>
+    Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFCF7),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE6D9BE)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              Text(title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              if (action != null) action,
+            ]),
+        const SizedBox(height: 14),
+        child,
+      ]),
+    );
 
 Widget sectionChip(String label) => Container(
-  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-  decoration: BoxDecoration(color: const Color(0xFFFFF1CF), borderRadius: BorderRadius.circular(999)),
-  child: Text(label, style: const TextStyle(color: Color(0xFF8A6726), fontWeight: FontWeight.w700)),
-);
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+          color: const Color(0xFFFFF1CF),
+          borderRadius: BorderRadius.circular(999)),
+      child: Text(label,
+          style: const TextStyle(
+              color: Color(0xFF8A6726), fontWeight: FontWeight.w700)),
+    );
 
 Widget smallSaveButton(VoidCallback onPressed) => ElevatedButton(
-  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
-  onPressed: onPressed,
-  child: const Text('SAVE'),
-);
+      style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+      onPressed: onPressed,
+      child: const Text('SAVE'),
+    );
 
 Widget tinyActionButton(String label) => ElevatedButton(
-  style: ElevatedButton.styleFrom(minimumSize: Size.zero, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-  onPressed: () {},
-  child: Text(label),
-);
+      style: ElevatedButton.styleFrom(
+          minimumSize: Size.zero,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+      onPressed: () {},
+      child: Text(label),
+    );
 
-DataColumn dataLabel(String label) => DataColumn(label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)));
+DataColumn dataLabel(String label) => DataColumn(
+    label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)));
 
-Widget metric(String label, String value) => SizedBox(width: 220, child: Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(value, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: ink)), const SizedBox(height: 6), Text(label)]))));
-Widget bullet(String text) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Padding(padding: EdgeInsets.only(top: 8), child: Icon(Icons.circle, size: 7, color: gold)), const SizedBox(width: 10), Expanded(child: Text(text))]));
-Widget badge(String text, Color color) => Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(12)), child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700)));
-String buildTrackingLink(String id) => '${Uri.base.toString().split('#').first}#/track?order=$id';
+Widget metric(String label, String value) => SizedBox(
+    width: 220,
+    child: Card(
+        child: Padding(
+            padding: const EdgeInsets.all(18),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(value,
+                  style: const TextStyle(
+                      fontSize: 26, fontWeight: FontWeight.w700, color: ink)),
+              const SizedBox(height: 6),
+              Text(label)
+            ]))));
+Widget bullet(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Icon(Icons.circle, size: 7, color: gold)),
+      const SizedBox(width: 10),
+      Expanded(child: Text(text))
+    ]));
+Widget badge(String text, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+        color: color.withOpacity(.12), borderRadius: BorderRadius.circular(12)),
+    child: Text(text,
+        style: TextStyle(color: color, fontWeight: FontWeight.w700)));
+String buildTrackingLink(String id) =>
+    '${Uri.base.toString().split('#').first}#/track?order=$id';

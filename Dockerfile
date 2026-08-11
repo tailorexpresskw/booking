@@ -28,9 +28,11 @@ RUN flutter build web --release
 FROM python:3.12-slim AS runtime
 
 WORKDIR /app
-COPY --from=build /app/build/web /app
+COPY --from=build /app/build/web /app/build/web
+COPY server.py /app/server.py
+COPY data /app/data
 
 ENV PORT=10000
 EXPOSE 10000
 
-CMD ["sh", "-c", "python -m http.server ${PORT:-10000} --bind 0.0.0.0 -d /app"]
+CMD ["python", "/app/server.py"]

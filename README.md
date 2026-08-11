@@ -1,29 +1,42 @@
-﻿# Tailor Express Platform
+# Tailor Express Platform
 
-This workspace contains a Flutter web prototype for a more premium Tailor Express booking and operations platform.
+This workspace contains a Flutter web app for Tailor Express booking plus a lightweight Python API for shared order storage.
 
 ## What is included
 
-- Premium customer booking flow
-- Admin dashboard prototype for bookings, customers, and complaints
-- Tailor workspace prototype for assigned visits and garment workflow
-- Driver board prototype for pickup, delivery, and route status
-- Tailor Express inspired luxury black and gold visual language
-- Local mock data and a clear hook for backend integration
+- Customer booking flow with policy-before-payment gate
+- Private admin, employee, tailor, and driver routes
+- Shared booking API with JSON file storage
+- Tracking page with driver-safe customer links
+- Render-ready Docker deployment
 
-## Run
+## Local run
 
-1. Make sure Flutter is installed.
-2. Run `flutter pub get`
-3. Run `flutter run -d chrome`
+1. Start the API server:
+   `python server.py`
+2. Start Flutter web:
+   `flutter run -d chrome`
+3. In local development the Flutter app will call `http://127.0.0.1:8090/api/orders` automatically.
 
-## Brand asset
+## Render deployment
 
-The current UI uses a code-based Tailor Express style wordmark so the prototype is usable immediately. If you want the exact production logo, add the image asset and swap it into the hero section.
+- Render will build the Flutter web app.
+- The runtime serves both the built web app and `/api/orders` from `server.py`.
+- Shared orders are stored in `data/orders.json` inside the container.
 
-## Next integration steps
+## Current credentials
 
-- Connect booking, assignment, payment, and complaints APIs
-- Add authentication and role-based access control for admin, tailor, and driver users
-- Replace mock route and slot data with live operational data
-- Add proper Arabic and English localization with real customer content
+- Admin: `admin / Admin123!`
+- Employee: `ops / Ops123!`
+- Tailor: `afroz / Tailor123!`
+- Driver: `omar / Driver123!`
+
+
+## Payment API
+
+The app uses a backend MyFatoorah invoice-link endpoint at `/api/payments/create`.
+Set these environment variables on the server or Render:
+
+- `MYFATOORAH_API_KEY`: server token from MyFatoorah. Never expose this in Flutter/web code.
+- `MYFATOORAH_BASE_URL`: `https://api.myfatoorah.com` for live Kuwait payments.
+- `PAYMENT_AMOUNT_KWD`: default home-service amount, currently `3.500`.

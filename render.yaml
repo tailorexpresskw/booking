@@ -10,3 +10,9 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      - key: MYFATOORAH_API_KEY
+        sync: false
+      - key: MYFATOORAH_BASE_URL
+        value: https://api.myfatoorah.com
+      - key: PAYMENT_AMOUNT_KWD
+        value: 3.500
