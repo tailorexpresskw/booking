@@ -617,6 +617,8 @@ class AppState extends ChangeNotifier {
         'service': order.service,
         'amount': amount,
         'method': method,
+        'language': isArabic ? 'ar' : 'en',
+        'origin': html.window.location.origin,
       }),
       requestHeaders: {
         'Accept': 'application/json',
@@ -1394,80 +1396,55 @@ class _BookingPageState extends State<BookingPage> {
 
   Future<void> showPaymentGate() async {
     final s = widget.state;
-    var method = 'KNET';
+    const amount = 3.5;
     final dialogWidth = dialogContentWidth(context, 540);
-    final paid = await showDialog<String>(
+    final proceed = await showDialog<bool>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(s.t('Payment', 'الدفع')),
-          content: SizedBox(
-            width: dialogWidth,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(s.t(
-                      'Choose a payment method after agreeing to the policies.',
-                      'اختر طريقة الدفع بعد الموافقة على السياسات.')),
-                  const SizedBox(height: 14),
-                  RadioListTile<String>(
-                      value: 'KNET',
-                      groupValue: method,
-                      onChanged: (value) =>
-                          setDialogState(() => method = value ?? 'KNET'),
-                      title: const Text('KNET')),
-                  RadioListTile<String>(
-                      value: 'Visa / MasterCard',
-                      groupValue: method,
-                      onChanged: (value) =>
-                          setDialogState(() => method = value ?? 'KNET'),
-                      title: const Text('Visa / MasterCard')),
-                  RadioListTile<String>(
-                      value: s.t('Cash on pickup', 'نقداً عند الاستلام'),
-                      groupValue: method,
-                      onChanged: (value) =>
-                          setDialogState(() => method = value ?? 'KNET'),
-                      title: Text(s.t('Cash on pickup', 'نقداً عند الاستلام'))),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFFFFF7E7),
-                        borderRadius: BorderRadius.circular(14)),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(s.t('Home service visit', 'زيارة الخدمة المنزلية'),
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 6),
-                        Text(s.t('Amount: KD 3.500', 'المبلغ: 3.500 د.ك')),
-                      ],
-                    ),
-                  ),
-                ],
+      builder: (context) => AlertDialog(
+        title: Text(s.t('UPay checkout', 'الدفع عبر UPay')),
+        content: SizedBox(
+          width: dialogWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(s.t(
+                  'You will be redirected to UPay to complete payment securely.',
+                  'سيتم تحويلك إلى UPay لإكمال الدفع بأمان.')),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7E7),
+                    borderRadius: BorderRadius.circular(14)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(s.t('Home service visit', 'زيارة الخدمة المنزلية'),
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    Text(s.t('Amount: KD 3.500', 'المبلغ: 3.500 د.ك')),
+                  ],
+                ),
               ),
-            ),
+            ],
           ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text(s.t('Back', 'رجوع'))),
-            ElevatedButton(
-                onPressed: () => Navigator.of(context).pop(method),
-                child: Text(s.t('Pay now', 'ادفع الآن'))),
-          ],
         ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(s.t('Back', 'رجوع'))),
+          ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(s.t('Continue to UPay', 'المتابعة إلى UPay'))),
+        ],
       ),
     );
 
-    if (paid == null || !mounted) return;
+    if (proceed != true || !mounted) return;
 
-    const amount = 3.5;
-    final cashLabel = s.t('Cash on pickup', 'نقداً عند الاستلام');
+    const paid = 'UPay';
     final paymentNote = s.isArabic ? 'الدفع: $paid' : 'Payment: $paid';
     final mergedNotes = notes.text.trim().isEmpty
         ? paymentNote
@@ -1486,32 +1463,26 @@ class _BookingPageState extends State<BookingPage> {
       paymentMethod: paid,
     );
 
-    if (paid != cashLabel) {
-      try {
-        final paymentUrl = await widget.state.createPaymentLink(
-          order: order,
-          amount: amount,
-          method: paid,
-        );
-        await launchUrl(Uri.parse(paymentUrl), webOnlyWindowName: '_blank');
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(s.t('Payment page opened. Booking created.',
-                'تم فتح صفحة الدفع وإنشاء الحجز.'))));
-      } catch (error) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(s.t(
-                'Booking created, but payment API is not configured yet.',
-                'تم إنشاء الحجز، لكن واجهة الدفع غير مفعلة بعد.'))));
-      }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(s.t('Booking created.', 'تم إنشاء الحجز.'))));
+    try {
+      final paymentUrl = await widget.state.createPaymentLink(
+        order: order,
+        amount: amount,
+        method: paid,
+      );
+      await launchUrl(Uri.parse(paymentUrl), webOnlyWindowName: '_self');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(s.t('UPay checkout opened. Booking created.',
+              'تم فتح صفحة UPay وإنشاء الحجز.'))));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(s.t(
+              'Booking created, but UPay is not configured yet.',
+              'تم إنشاء الحجز، لكن UPay غير مفعل بعد.'))));
+      Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
     }
-    Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
   }
-
   Widget policyCard(PolicyRecord policy) {
     final s = widget.state;
     return Container(

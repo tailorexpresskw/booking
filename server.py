@@ -8,6 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 from urllib.parse import unquote, urlparse
+import urllib.parse
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / 'build' / 'web'
@@ -76,6 +77,7 @@ def timestamp() -> str:
 
 
 
+
 def payment_amount() -> float:
     try:
         return float(os.environ.get('PAYMENT_AMOUNT_KWD', '3.500'))
@@ -83,25 +85,72 @@ def payment_amount() -> float:
         return 3.5
 
 
-def create_myfatoorah_payment(payload: dict) -> dict:
-    token = os.environ.get('MYFATOORAH_API_KEY', '').strip()
-    if not token:
-        raise RuntimeError('Payment API is not configured. Set MYFATOORAH_API_KEY on the server.')
+def normalize_mobile_for_upayments(mobile: str) -> str:
+    digits = ''.join(ch for ch in mobile if ch.isdigit())
+    if digits.startswith('965'):
+        return f'+{digits}'
+    if len(digits) == 8:
+        return f'+965{digits}'
+    return f'+{digits}' if digits else ''
 
-    base_url = os.environ.get('MYFATOORAH_BASE_URL', 'https://api.myfatoorah.com').rstrip('/')
+
+def app_base_url(payload: dict) -> str:
+    configured = os.environ.get('APP_BASE_URL', '').strip().rstrip('/')
+    if configured:
+        return configured
+    origin = str(payload.get('origin', '')).strip().rstrip('/')
+    return origin or 'http://127.0.0.1:8090'
+
+
+def create_upayments_payment(payload: dict) -> dict:
+    token = os.environ.get('UPAYMENTS_API_KEY', '').strip()
+    if not token:
+        raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
+
+    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
     amount = float(payload.get('amount') or payment_amount())
+    order_id = str(payload.get('orderId', '')).strip() or next_order_id(load_orders())
+    customer_name = str(payload.get('customer', 'Tailor Express Customer')).strip() or 'Tailor Express Customer'
+    service = str(payload.get('service', 'Tailor Express home service')).strip() or 'Tailor Express home service'
+    language = str(payload.get('language', 'en')).strip().lower()
+    if language not in ('en', 'ar'):
+        language = 'en'
+    base = app_base_url(payload)
+    encoded_order_id = urllib.parse.quote(order_id, safe='')
+    mobile = normalize_mobile_for_upayments(str(payload.get('mobile', '')))
+
     body = {
-        'CustomerName': str(payload.get('customer', 'Tailor Express Customer')).strip() or 'Tailor Express Customer',
-        'NotificationOption': 'LNK',
-        'InvoiceValue': amount,
-        'DisplayCurrencyIso': 'KWD',
-        'CustomerMobile': str(payload.get('mobile', '')).strip(),
-        'CustomerReference': str(payload.get('orderId', '')).strip(),
-        'UserDefinedField': str(payload.get('service', 'Tailor Express home service')).strip(),
+        'products': [
+            {
+                'name': service,
+                'description': 'Tailor Express home service booking',
+                'price': amount,
+                'quantity': 1,
+            }
+        ],
+        'order': {
+            'id': order_id,
+            'reference': order_id,
+            'description': f'Tailor Express booking {order_id}',
+            'currency': 'KWD',
+            'amount': amount,
+        },
+        'language': language,
+        'reference': {'id': order_id},
+        'customer': {
+            'uniqueId': mobile.replace('+', '') or order_id,
+            'name': customer_name,
+            'mobile': mobile,
+        },
+        'returnUrl': f'{base}/track?order={encoded_order_id}&payment=success',
+        'cancelUrl': f'{base}/track?order={encoded_order_id}&payment=failed',
+        'notificationUrl': f'{base}/api/payments/webhook',
+        'customerExtraData': order_id,
+        'paymentLinkExpiryInMinutes': int(os.environ.get('UPAYMENTS_LINK_EXPIRY_MINUTES', '60')),
     }
-    body = {key: value for key, value in body.items() if value not in ('', None)}
+
     request = urllib.request.Request(
-        f'{base_url}/v2/SendPayment',
+        f'{base_url}/api/v1/charge',
         data=json.dumps(body).encode('utf-8'),
         headers={
             'Accept': 'application/json',
@@ -115,18 +164,18 @@ def create_myfatoorah_payment(payload: dict) -> dict:
             result = json.loads(response.read().decode('utf-8'))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode('utf-8', errors='replace')
-        raise RuntimeError(f'MyFatoorah error {exc.code}: {detail}') from exc
+        raise RuntimeError(f'UPayments error {exc.code}: {detail}') from exc
 
-    data = result.get('Data') if isinstance(result, dict) else None
+    data = result.get('data') if isinstance(result, dict) else None
     if not isinstance(data, dict):
-        raise RuntimeError('Unexpected MyFatoorah response.')
-    payment_url = data.get('InvoiceURL') or data.get('PaymentURL')
+        raise RuntimeError('Unexpected UPayments response.')
+    payment_url = data.get('link')
     if not payment_url:
-        raise RuntimeError('MyFatoorah did not return a payment URL.')
+        raise RuntimeError('UPayments did not return a payment URL.')
     return {
-        'provider': 'myfatoorah',
+        'provider': 'upayments',
         'paymentUrl': payment_url,
-        'invoiceId': data.get('InvoiceId'),
+        'trackId': data.get('trackId'),
         'amount': amount,
     }
 
@@ -238,7 +287,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/payments/create':
             try:
                 payload = self._read_json_body()
-                payment = create_myfatoorah_payment(payload)
+                payment = create_upayments_payment(payload)
             except json.JSONDecodeError:
                 self._send_json({'error': 'Invalid JSON body'}, status=400)
             except RuntimeError as exc:
@@ -247,6 +296,11 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self._send_json({'error': f'Payment request failed: {exc}'}, status=502)
             else:
                 self._send_json(payment, status=201)
+            return
+
+        if parsed.path == '/api/payments/webhook':
+            # UPayments sends server-to-server payment updates here.
+            self._send_json({'ok': True})
             return
 
         if parsed.path != '/api/orders':

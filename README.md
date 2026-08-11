@@ -5,7 +5,7 @@ This workspace contains a Flutter web app for Tailor Express booking plus a ligh
 ## What is included
 
 - Customer booking flow with policy-before-payment gate
-- Private admin, employee, tailor, and driver routes
+- Private admin, employee, receptionist supervisor, driver supervisor, receptionist, tailor, and driver routes
 - Shared booking API with JSON file storage
 - Tracking page with driver-safe customer links
 - Render-ready Docker deployment
@@ -22,21 +22,28 @@ This workspace contains a Flutter web app for Tailor Express booking plus a ligh
 
 - Render will build the Flutter web app.
 - The runtime serves both the built web app and `/api/orders` from `server.py`.
-- Shared orders are stored in `data/orders.json` inside the container.
+- Shared orders are stored in `data/orders.json` inside the container. Add a Render Disk mounted at `/app/data` if you need orders to survive service rebuilds.
 
 ## Current credentials
 
-- Admin: `admin / Admin123!`
-- Employee: `ops / Ops123!`
-- Tailor: `afroz / Tailor123!`
-- Driver: `omar / Driver123!`
+Private dashboards use separate direct links and role credentials:
 
+- Admin: `/login/admin` with `admin / Admin123!`
+- Customer Service: `/login/employee` with `ops / Ops123!`
+- Receptionist Supervisor: `/login/receptionistSupervisor` with `reception-lead / ReceptionLead123!`
+- Driver Supervisor: `/login/driverSupervisor` with `driver-lead / DriverLead123!`
+- Receptionist: `/login/receptionist` with `reception / Reception123!`
+- Tailor: `/login/tailor` with `afroz / Tailor123!`
+- Driver: `/login/driver` with `omar / Driver123!`
 
 ## Payment API
 
-The app uses a backend MyFatoorah invoice-link endpoint at `/api/payments/create`.
+The app uses a backend UPay/UPayments hosted-checkout endpoint at `/api/payments/create`.
 Set these environment variables on the server or Render:
 
-- `MYFATOORAH_API_KEY`: server token from MyFatoorah. Never expose this in Flutter/web code.
-- `MYFATOORAH_BASE_URL`: `https://api.myfatoorah.com` for live Kuwait payments.
+- `UPAYMENTS_API_KEY`: server Bearer token from UPay/UPayments. Never expose this in Flutter/web code.
+- `UPAYMENTS_BASE_URL`: UPayments API base URL. Use `https://sandboxapi.upayments.com` for sandbox unless UPay gives you a different live URL.
+- `APP_BASE_URL`: public app URL used for return/cancel/webhook URLs, for example `https://tailor-express-booking.onrender.com`.
 - `PAYMENT_AMOUNT_KWD`: default home-service amount, currently `3.500`.
+
+Customers accept the policies first, then they are redirected to the hosted UPay checkout page.
