@@ -1,4 +1,4 @@
-﻿.dart_tool/
+.dart_tool/
 .idea/
 .packages
 .flutter-plugins
@@ -14,3 +14,4 @@ generate_deploy_key.cmd
 __pycache__/
 *.log
 data/orders.json
+data/staff_users.json

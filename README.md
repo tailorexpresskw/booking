@@ -24,17 +24,21 @@ This workspace contains a Flutter web app for Tailor Express booking plus a ligh
 - The runtime serves both the built web app and `/api/orders` from `server.py`.
 - Shared orders are stored in `data/orders.json` inside the container. Add a Render Disk mounted at `/app/data` if you need orders to survive service rebuilds.
 
-## Current credentials
+## Staff portal
 
-Private dashboards use separate direct links and role credentials:
+All staff use one private login link: `/login/staff`. The signed-in user's role controls the dashboard tools.
 
-- Admin: `/login/admin` with `admin / Admin123!`
-- Customer Service: `/login/employee` with `ops / Ops123!`
-- Receptionist Supervisor: `/login/receptionistSupervisor` with `reception-lead / ReceptionLead123!`
-- Driver Supervisor: `/login/driverSupervisor` with `driver-lead / DriverLead123!`
-- Receptionist: `/login/receptionist` with `reception / Reception123!`
-- Tailor: `/login/tailor` with `afroz / Tailor123!`
-- Driver: `/login/driver` with `omar / Driver123!`
+Default credentials:
+
+- Admin: `admin / Admin123!`
+- Customer Service: `ops / Ops123!`
+- Receptionist Supervisor: `reception-lead / ReceptionLead123!`
+- Driver Supervisor: `driver-lead / DriverLead123!`
+- Receptionist: `reception / Reception123!`
+- Tailor: `afroz / Tailor123!`
+- Driver: `omar / Driver123!`
+
+Admin can create extra staff users from the Staff Users panel. Prototype staff users are stored in data/staff_users.json; production should move staff accounts to a real database with hashed passwords.
 
 ## Payment API
 

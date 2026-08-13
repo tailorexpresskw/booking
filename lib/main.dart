@@ -33,6 +33,7 @@ enum Stage {
 }
 
 const ordersStorageKey = 'tailor_express_orders_v1';
+const staffUsersStorageKey = 'tailor_express_staff_users_v1';
 
 Role? roleFromSlug(String slug) {
   for (final role in Role.values) {
@@ -221,8 +222,85 @@ class Complaint {
   String type(bool isArabic) => isArabic ? typeAr : typeEn;
 }
 
-const staffReceptionists = <String>['Aisha', 'Fatima', 'Mona', 'Noura'];
-const staffDrivers = <String>['Omar', 'Khaled', 'Yousef', 'Nasser'];
+class StaffUser {
+  const StaffUser({
+    required this.username,
+    required this.password,
+    required this.displayName,
+    required this.role,
+    this.active = true,
+  });
+
+  final String username;
+  final String password;
+  final String displayName;
+  final Role role;
+  final bool active;
+
+  Map<String, dynamic> toJson() => {
+        'username': username,
+        'password': password,
+        'displayName': displayName,
+        'role': role.name,
+        'active': active,
+      };
+
+  factory StaffUser.fromJson(Map<String, dynamic> json) => StaffUser(
+        username: json['username'] as String? ?? '',
+        password: json['password'] as String? ?? '',
+        displayName: json['displayName'] as String? ?? '',
+        role: roleFromSlug(json['role'] as String? ?? '') ?? Role.employee,
+        active: json['active'] as bool? ?? true,
+      );
+}
+
+const defaultStaffUsers = <StaffUser>[
+  StaffUser(
+      username: 'admin',
+      password: 'Admin123!',
+      displayName: 'Admin',
+      role: Role.admin),
+  StaffUser(
+      username: 'ops',
+      password: 'Ops123!',
+      displayName: 'Customer Service',
+      role: Role.employee),
+  StaffUser(
+      username: 'reception-lead',
+      password: 'ReceptionLead123!',
+      displayName: 'Reception Lead',
+      role: Role.receptionistSupervisor),
+  StaffUser(
+      username: 'driver-lead',
+      password: 'DriverLead123!',
+      displayName: 'Driver Lead',
+      role: Role.driverSupervisor),
+  StaffUser(
+      username: 'reception',
+      password: 'Reception123!',
+      displayName: 'Aisha',
+      role: Role.receptionist),
+  StaffUser(
+      username: 'afroz',
+      password: 'Tailor123!',
+      displayName: 'AFROZ',
+      role: Role.tailor),
+  StaffUser(
+      username: 'omar',
+      password: 'Driver123!',
+      displayName: 'Omar',
+      role: Role.driver),
+  StaffUser(
+      username: 'khaled',
+      password: 'Driver123!',
+      displayName: 'Khaled',
+      role: Role.driver),
+  StaffUser(
+      username: 'fatima',
+      password: 'Reception123!',
+      displayName: 'Fatima',
+      role: Role.receptionist),
+];
 
 bool isPendingAssignment(String value) {
   final normalized = value.trim().toLowerCase();
@@ -450,7 +528,9 @@ const seedOrders = <Order>[
 
 class AppState extends ChangeNotifier {
   AppState() {
+    _loadStaffUsers();
     _loadOrders();
+    unawaited(refreshStaffUsers());
     unawaited(refreshOrders());
     _poller = Timer.periodic(const Duration(seconds: 8), (_) {
       unawaited(refreshOrders(quiet: true));
@@ -460,7 +540,9 @@ class AppState extends ChangeNotifier {
   bool isArabic = false;
   Role? role;
   String user = '';
+  StaffUser? currentStaff;
   final List<Order> orders = [];
+  final List<StaffUser> staffUsers = [];
   Timer? _poller;
 
   String t(String en, String ar) => isArabic ? ar : en;
@@ -472,32 +554,168 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool login(Role nextRole, String name, String pass) {
-    final ok = switch (nextRole) {
-      Role.admin => name == 'admin' && pass == 'Admin123!',
-      Role.employee => name == 'ops' && pass == 'Ops123!',
-      Role.receptionistSupervisor =>
-        name == 'reception-lead' && pass == 'ReceptionLead123!',
-      Role.driverSupervisor =>
-        name == 'driver-lead' && pass == 'DriverLead123!',
-      Role.receptionist => name == 'reception' && pass == 'Reception123!',
-      Role.tailor => name == 'afroz' && pass == 'Tailor123!',
-      Role.driver => name == 'omar' && pass == 'Driver123!',
-    };
-    if (!ok) return false;
-    role = nextRole;
-    user = name;
-    notifyListeners();
-    return true;
+  void _loadStaffUsers() {
+    staffUsers.clear();
+    final raw = html.window.localStorage[staffUsersStorageKey];
+    if (raw == null || raw.isEmpty) {
+      staffUsers.addAll(defaultStaffUsers);
+      _saveStaffUsers();
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        staffUsers.addAll(decoded
+            .whereType<Object?>()
+            .map((item) => item is Map
+                ? StaffUser.fromJson(Map<String, dynamic>.from(item))
+                : null)
+            .whereType<StaffUser>());
+      }
+    } catch (_) {
+      staffUsers
+        ..clear()
+        ..addAll(defaultStaffUsers);
+    }
+    if (staffUsers.isEmpty) staffUsers.addAll(defaultStaffUsers);
+  }
+
+  void _saveStaffUsers() {
+    html.window.localStorage[staffUsersStorageKey] =
+        jsonEncode(staffUsers.map((item) => item.toJson()).toList());
+  }
+
+  Future<void> refreshStaffUsers() async {
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/staff-users'),
+        method: 'GET',
+        requestHeaders: {'Accept': 'application/json'},
+      );
+      final decoded = jsonDecode(response.responseText ?? '[]');
+      if (decoded is! List) return;
+      staffUsers
+        ..clear()
+        ..addAll(decoded
+            .whereType<Object?>()
+            .map((item) => item is Map
+                ? StaffUser.fromJson(Map<String, dynamic>.from(item))
+                : null)
+            .whereType<StaffUser>());
+      if (staffUsers.isEmpty) staffUsers.addAll(defaultStaffUsers);
+      _saveStaffUsers();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<bool> login(String name, String pass) async {
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/login'),
+        method: 'POST',
+        sendData: jsonEncode({'username': name.trim(), 'password': pass}),
+        requestHeaders: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      final status = response.status ?? 0;
+      if (status >= 200 && status < 300 && response.responseText != null) {
+        final decoded = Map<String, dynamic>.from(
+            jsonDecode(response.responseText!) as Map);
+        final remoteUser = decoded['user'];
+        if (remoteUser is Map) {
+          final matched = StaffUser.fromJson(Map<String, dynamic>.from(remoteUser));
+          currentStaff = matched;
+          role = matched.role;
+          user = matched.displayName;
+          notifyListeners();
+          unawaited(refreshStaffUsers());
+          return true;
+        }
+      }
+      return false;
+    } catch (_) {
+      final normalized = name.trim().toLowerCase();
+      StaffUser? matched;
+      for (final item in staffUsers) {
+        if (item.active &&
+            item.username.toLowerCase() == normalized &&
+            item.password == pass) {
+          matched = item;
+          break;
+        }
+      }
+      if (matched == null) return false;
+      currentStaff = matched;
+      role = matched.role;
+      user = matched.displayName;
+      notifyListeners();
+      return true;
+    }
   }
 
   void logout() {
     role = null;
     user = '';
+    currentStaff = null;
     notifyListeners();
   }
 
   bool canOpen(Role target) => role == target;
+
+  Future<bool> addStaffUser(StaffUser next) async {
+    final normalized = next.username.trim().toLowerCase();
+    if (normalized.isEmpty || next.password.isEmpty || next.displayName.isEmpty) {
+      return false;
+    }
+    if (staffUsers.any((user) => user.username.toLowerCase() == normalized)) {
+      return false;
+    }
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/staff-users'),
+        method: 'POST',
+        sendData: jsonEncode(next.toJson()),
+        requestHeaders: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      final status = response.status ?? 0;
+      if (status < 200 || status >= 300) return false;
+      if (response.responseText != null && response.responseText!.isNotEmpty) {
+        final created = StaffUser.fromJson(Map<String, dynamic>.from(
+            jsonDecode(response.responseText!) as Map));
+        staffUsers.removeWhere((user) =>
+            user.username.toLowerCase() == created.username.toLowerCase());
+        staffUsers.add(created);
+      } else {
+        staffUsers.add(next);
+      }
+      _saveStaffUsers();
+      notifyListeners();
+      return true;
+    } catch (_) {
+      staffUsers.add(next);
+      _saveStaffUsers();
+      notifyListeners();
+      return true;
+    }
+  }
+
+  List<String> staffNamesForRole(Role target) {
+    final names = staffUsers
+        .where((item) => item.active && item.role == target)
+        .map((item) => item.displayName)
+        .where((name) => name.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    names.sort();
+    return names;
+  }
+
+  String get currentStaffName => currentStaff?.displayName ?? user;
 
   String apiUrl(String path) {
     const configured = String.fromEnvironment('API_BASE', defaultValue: '');
@@ -567,6 +785,8 @@ class AppState extends ChangeNotifier {
       final b = next[i];
       if (a.id != b.id ||
           a.stage != b.stage ||
+          a.branch != b.branch ||
+          a.receptionist != b.receptionist ||
           a.driver != b.driver ||
           a.tailor != b.tailor ||
           a.notes != b.notes) {
@@ -844,17 +1064,16 @@ class TailorWebApp extends StatelessWidget {
     if (path == '/track')
       return TrackPage(state: state, initialId: uri.queryParameters['order']);
     if (path == '/staff') return StaffHubPage(state: state);
-    if (path.startsWith('/login/')) {
-      final role =
-          roleFromSlug(uri.pathSegments.length > 1 ? uri.pathSegments[1] : '');
-      if (role != null) return LoginPage(state: state, role: role);
+    if (path == '/login' || path == '/login/staff' || path.startsWith('/login/')) {
+      return LoginPage(state: state);
     }
-    if (path.startsWith('/dashboard/')) {
-      final role =
-          roleFromSlug(uri.pathSegments.length > 1 ? uri.pathSegments[1] : '');
-      if (role == null || !state.canOpen(role))
-        return LockedPage(state: state, role: role);
-      return DashboardPage(state: state, role: role);
+    if (path == '/dashboard' ||
+        path == '/dashboard/staff' ||
+        path.startsWith('/dashboard/')) {
+      if (!state.signedIn || state.role == null) {
+        return LockedPage(state: state, role: null);
+      }
+      return DashboardPage(state: state, role: state.role!);
     }
     return BookingPage(state: state);
   }
@@ -913,11 +1132,10 @@ class Shell extends StatelessWidget {
                             if (role != null && state.signedIn)
                               ElevatedButton(
                                   onPressed: () {
-                                    final next = role!;
                                     state.logout();
                                     Navigator.of(context)
                                         .pushNamedAndRemoveUntil(
-                                            '/login/${next.name}',
+                                            '/login/staff',
                                             (r) => false);
                                   },
                                   child: Text(
@@ -1713,54 +1931,47 @@ class StaffHubPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Shell(
       state: state,
-      title: state.t(
-          'Protected staff links for admin, employee, tailor and driver.',
-          'روابط موظفين محمية للإدارة والموظف والخياط والسائق.'),
+      title: state.t('One private staff login.', '\u062a\u0633\u062c\u064a\u0644 \u062f\u062e\u0648\u0644 \u0645\u0648\u062d\u062f \u0644\u0644\u0645\u0648\u0638\u0641\u064a\u0646.'),
       subtitle: state.t(
-          'This hub is outside the customer flow. Each role has a different link and password.',
-          'هذه البوابة خارج مسار العميل. لكل دور رابط مختلف وكلمة مرور مختلفة.'),
-      body: Wrap(spacing: 16, runSpacing: 16, children: [
-        loginCard(context, Role.admin, 'admin / Admin123!'),
-        loginCard(context, Role.employee, 'ops / Ops123!'),
-        loginCard(context, Role.receptionistSupervisor,
-            'reception-lead / ReceptionLead123!'),
-        loginCard(
-            context, Role.driverSupervisor, 'driver-lead / DriverLead123!'),
-        loginCard(context, Role.receptionist, 'reception / Reception123!'),
-        loginCard(context, Role.tailor, 'afroz / Tailor123!'),
-        loginCard(context, Role.driver, 'omar / Driver123!'),
-      ]),
+          'Use /login/staff. The account role decides which dashboard features are available.',
+          '\u0627\u0633\u062a\u062e\u062f\u0645 /login/staff. \u0646\u0648\u0639 \u0627\u0644\u062d\u0633\u0627\u0628 \u064a\u062d\u062f\u062f \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u062d\u0629 \u0628\u0639\u062f \u0627\u0644\u062f\u062e\u0648\u0644.'),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(state.t('Staff portal', '\u0628\u0648\u0627\u0628\u0629 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646'),
+                        style: Theme.of(context).textTheme.headlineSmall),
+                    const SizedBox(height: 10),
+                    Text('/login/staff'),
+                    const SizedBox(height: 14),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      for (final role in Role.values)
+                        sectionChip(roleLabel(role, state.isArabic)),
+                    ]),
+                    const SizedBox(height: 18),
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.of(context)
+                          .pushReplacementNamed('/login/staff'),
+                      icon: const Icon(Icons.lock_open),
+                      label: Text(state.t('Open staff login', '\u0641\u062a\u062d \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646')),
+                    ),
+                  ]),
+            ),
+          ),
+        ),
+      ),
     );
   }
-
-  Widget loginCard(BuildContext context, Role role, String creds) => SizedBox(
-        width: 280,
-        child: Card(
-            child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(roleLabel(role, state.isArabic),
-                          style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 8),
-                      Text('/login/${role.name}'),
-                      const SizedBox(height: 6),
-                      Text(creds),
-                      const SizedBox(height: 14),
-                      ElevatedButton(
-                          onPressed: () => Navigator.of(context)
-                              .pushReplacementNamed('/login/${role.name}'),
-                          child:
-                              Text(state.t('Open login', 'افتح صفحة الدخول'))),
-                    ]))),
-      );
 }
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.state, required this.role});
+  const LoginPage({super.key, required this.state});
   final AppState state;
-  final Role role;
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
@@ -1782,12 +1993,10 @@ class _LoginPageState extends State<LoginPage> {
     final s = widget.state;
     return Shell(
       state: s,
-      title: s.t(
-          '${roleLabel(widget.role, false)} login on a separate private route.',
-          'تسجيل دخول ${roleLabel(widget.role, true)} عبر رابط خاص مستقل.'),
+      title: s.t('Staff login.', '\u062a\u0633\u062c\u064a\u0644 \u062f\u062e\u0648\u0644 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646.'),
       subtitle: s.t(
-          'Customers cannot browse from booking into this dashboard. The correct role password is required.',
-          'لا يمكن للعميل الوصول من الحجز إلى هذه اللوحة. يجب استخدام كلمة مرور الدور الصحيح.'),
+          'One private link for admin, supervisors, receptionists, tailors and drivers. Permissions come from the user role.',
+          '\u0631\u0627\u0628\u0637 \u062e\u0627\u0635 \u0648\u0627\u062d\u062f \u0644\u0644\u0625\u062f\u0627\u0631\u0629 \u0648\u0627\u0644\u0645\u0634\u0631\u0641\u064a\u0646 \u0648\u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u0648\u0627\u0644\u062e\u064a\u0627\u0637\u064a\u0646 \u0648\u0627\u0644\u0633\u0627\u0626\u0642\u064a\u0646. \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u062d\u0633\u0628 \u0646\u0648\u0639 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645.'),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 500),
@@ -1799,26 +2008,25 @@ class _LoginPageState extends State<LoginPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                        "${roleLabel(widget.role, s.isArabic)} ${s.t('Login', 'تسجيل الدخول')}",
+                    Text(s.t('Enter staff portal', '\u0627\u0644\u062f\u062e\u0648\u0644 \u0625\u0644\u0649 \u0628\u0648\u0627\u0628\u0629 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646'),
                         style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 14),
                     TextFormField(
                         controller: user,
                         validator: req,
                         decoration: InputDecoration(
-                            labelText: s.t('Username', 'اسم المستخدم'))),
+                            labelText: s.t('Username', '\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645'))),
                     const SizedBox(height: 12),
                     TextFormField(
                         controller: pass,
                         validator: req,
                         obscureText: true,
                         decoration: InputDecoration(
-                            labelText: s.t('Password', 'كلمة المرور'))),
+                            labelText: s.t('Password', '\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631'))),
                     const SizedBox(height: 16),
                     ElevatedButton(
                         onPressed: submit,
-                        child: Text(s.t('Enter dashboard', 'ادخل إلى اللوحة'))),
+                        child: Text(s.t('Enter dashboard', '\u0627\u062f\u062e\u0644 \u0625\u0644\u0649 \u0627\u0644\u0644\u0648\u062d\u0629'))),
                   ],
                 ),
               ),
@@ -1829,20 +2037,19 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  String? req(String? v) => v == null || v.trim().isEmpty
-      ? widget.state.t('Required', 'مطلوب')
-      : null;
+  String? req(String? v) =>
+      v == null || v.trim().isEmpty ? widget.state.t('Required', '\u0645\u0637\u0644\u0648\u0628') : null;
 
-  void submit() {
+  Future<void> submit() async {
     if (!form.currentState!.validate()) return;
-    if (!widget.state.login(widget.role, user.text.trim(), pass.text)) {
+    if (!await widget.state.login(user.text.trim(), pass.text)) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(widget.state.t('Incorrect credentials for this role.',
-              'بيانات الدخول غير صحيحة لهذا الدور.'))));
+          content: Text(widget.state.t('Incorrect username or password.',
+              '\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063a\u064a\u0631 \u0635\u062d\u064a\u062d\u0629.'))));
       return;
     }
-    Navigator.of(context).pushNamedAndRemoveUntil(
-        '/dashboard/${widget.role.name}', (r) => false);
+    Navigator.of(context)
+        .pushNamedAndRemoveUntil('/dashboard/staff', (r) => false);
   }
 }
 
@@ -1852,7 +2059,6 @@ class LockedPage extends StatelessWidget {
   final Role? role;
   @override
   Widget build(BuildContext context) {
-    final target = role ?? Role.admin;
     return Shell(
       state: state,
       title: state.t('Access denied.', 'تم رفض الوصول.'),
@@ -1861,7 +2067,7 @@ class LockedPage extends StatelessWidget {
           'هذه اللوحة تحتاج إلى تسجيل دخول الدور الصحيح وتبقى مخفية عن صفحات العميل.'),
       body: ElevatedButton(
           onPressed: () => Navigator.of(context)
-              .pushReplacementNamed('/login/${target.name}'),
+              .pushReplacementNamed('/login/staff'),
           child: Text(state.t('Go to login', 'اذهب إلى الدخول'))),
     );
   }
@@ -1889,10 +2095,13 @@ class DashboardPage extends StatelessWidget {
 
     final active =
         state.orders.where((o) => o.stage != Stage.delivered).toList();
+    final staffName = state.currentStaffName.toLowerCase();
     final mine = switch (role) {
-      Role.driver => active,
-      Role.tailor => state.orders
-          .where((o) => o.tailor.toLowerCase().contains('afroz'))
+      Role.driver => active
+          .where((o) => o.driver.toLowerCase() == staffName)
+          .toList(),
+      Role.tailor => active
+          .where((o) => o.tailor.toLowerCase() == staffName)
           .toList(),
       _ => state.orders,
     };
@@ -1958,6 +2167,152 @@ class DashboardPage extends StatelessWidget {
           DriverOperationsPanel(state: state, orders: mine),
       ]),
     );
+  }
+}
+
+class BranchAssignmentCard extends StatelessWidget {
+  const BranchAssignmentCard({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final pendingBranch = state.orders
+        .where((o) => o.stage != Stage.delivered && !o.hasBranch)
+        .toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(state.t('Pending home-service orders', 'Pending home-service orders'),
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          if (pendingBranch.isEmpty)
+            Text(state.t('No orders waiting for branch assignment.',
+                'No orders waiting for branch assignment.')),
+          for (final order in pendingBranch)
+            workflowOrderCard(context, state, order, actions: [
+              ElevatedButton.icon(
+                onPressed: () => _assignBranch(context, order),
+                icon: const Icon(Icons.storefront),
+                label: Text(state.t('Assign branch', 'Assign branch')),
+              ),
+            ]),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _assignBranch(BuildContext context, Order order) async {
+    final assignment = await showReceptionAssignmentDialog(context, state, order);
+    if (assignment == null) return;
+    await state.updateOrder(
+      order.id,
+      branch: assignment.branch,
+      receptionist: assignment.receptionist,
+      stage: Stage.branchAssigned,
+      timelineNote: 'Branch assigned to ${assignment.branch}',
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Branch assignment saved.', 'Branch assignment saved.'))));
+    }
+  }
+}
+
+class DriverAssignmentCard extends StatelessWidget {
+  const DriverAssignmentCard({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final driverQueue = state.orders
+        .where((o) => o.stage != Stage.delivered && o.hasBranch && !o.hasDriver)
+        .toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(state.t('Driver assignment queue', 'Driver assignment queue'),
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          if (driverQueue.isEmpty)
+            Text(state.t('No branch-assigned orders waiting for a driver.',
+                'No branch-assigned orders waiting for a driver.')),
+          for (final order in driverQueue)
+            workflowOrderCard(context, state, order, actions: [
+              ElevatedButton.icon(
+                onPressed: () => _assignDriver(context, order),
+                icon: const Icon(Icons.local_shipping),
+                label: Text(state.t('Assign driver', 'Assign driver')),
+              ),
+            ]),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _assignDriver(BuildContext context, Order order) async {
+    final driver = await showStaffSelectionDialog(
+      context,
+      state,
+      title: state.t('Assign driver', 'Assign driver'),
+      label: state.t('Driver', 'Driver'),
+      items: state.staffNamesForRole(Role.driver),
+      initialValue: order.hasDriver ? order.driver : null,
+    );
+    if (driver == null) return;
+    await state.updateOrder(
+      order.id,
+      driver: driver,
+      stage: Stage.assigned,
+      timelineNote: 'Driver assigned to $driver',
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Driver assignment saved.', 'Driver assignment saved.'))));
+    }
+  }
+}
+
+class OperationsTrackingPanel extends StatelessWidget {
+  const OperationsTrackingPanel({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = state.orders.where((o) => o.stage != Stage.delivered).toList();
+    final history = state.orders.where((o) => o.stage == Stage.delivered).toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(state.t('Active order tracking', 'Active order tracking'),
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            if (active.isEmpty)
+              Text(state.t('No active orders.', 'No active orders.')),
+            for (final order in active.take(10))
+              workflowOrderCard(context, state, order),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 18),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(state.t('History', 'History'),
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            if (history.isEmpty)
+              Text(state.t('No closed orders yet.', 'No closed orders yet.')),
+            for (final order in history.take(10))
+              workflowOrderCard(context, state, order),
+          ]),
+        ),
+      ),
+    ]);
   }
 }
 
@@ -2037,7 +2392,7 @@ class DriverOperationsPanel extends StatelessWidget {
       state,
       title: state.t('Select receptionist', 'اختيار موظف الاستقبال'),
       label: state.t('Receptionist', 'الاستقبال'),
-      items: staffReceptionists,
+      items: state.staffNamesForRole(Role.receptionist),
       initialValue: order.hasReceptionist ? order.receptionist : null,
     );
     if (receptionist == null) return;
@@ -2122,6 +2477,8 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
             ]),
           ),
         ),
+        const SizedBox(height: 18),
+        OperationsTrackingPanel(state: state),
       ]),
     );
   }
@@ -2199,6 +2556,8 @@ class DriverSupervisorDashboard extends StatelessWidget {
             ]),
           ),
         ),
+        const SizedBox(height: 18),
+        OperationsTrackingPanel(state: state),
       ]),
     );
   }
@@ -2209,7 +2568,7 @@ class DriverSupervisorDashboard extends StatelessWidget {
       state,
       title: state.t('Assign driver', 'تعيين السائق'),
       label: state.t('Driver', 'السائق'),
-      items: staffDrivers,
+      items: state.staffNamesForRole(Role.driver),
       initialValue: order.hasDriver ? order.driver : null,
     );
     if (driver == null) return;
@@ -2235,8 +2594,12 @@ class ReceptionistDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final staffName = state.currentStaffName.toLowerCase();
     final branchOrders = state.orders
-        .where((o) => o.stage != Stage.delivered && o.hasBranch)
+        .where((o) =>
+            o.stage != Stage.delivered &&
+            o.hasBranch &&
+            o.receptionist.toLowerCase() == staffName)
         .toList();
     final ready = branchOrders.where((o) => o.stage == Stage.ready).length;
     return Shell(
@@ -2345,7 +2708,7 @@ Future<ReceptionAssignment?> showReceptionAssignmentDialog(
   var branch = order.hasBranch ? order.branch : adminBranches.first.name;
   const pending = 'Pending assignment';
   var receptionist = order.hasReceptionist ? order.receptionist : pending;
-  final receptionistItems = [pending, ...staffReceptionists];
+  final receptionistItems = [pending, ...state.staffNamesForRole(Role.receptionist)];
   return showDialog<ReceptionAssignment>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
@@ -2405,7 +2768,8 @@ Future<String?> showStaffSelectionDialog(
   required List<String> items,
   String? initialValue,
 }) {
-  var selected = items.contains(initialValue) ? initialValue! : items.first;
+  final available = items.isEmpty ? <String>['Pending assignment'] : items;
+  var selected = available.contains(initialValue) ? initialValue! : available.first;
   return showDialog<String>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
@@ -2415,7 +2779,7 @@ Future<String?> showStaffSelectionDialog(
           value: selected,
           decoration: InputDecoration(labelText: label),
           items: [
-            for (final item in items)
+            for (final item in available)
               DropdownMenuItem(value: item, child: Text(item)),
           ],
           onChanged: (value) =>
@@ -2434,6 +2798,128 @@ Future<String?> showStaffSelectionDialog(
       ),
     ),
   );
+}
+
+class StaffUsersPanel extends StatefulWidget {
+  const StaffUsersPanel({super.key, required this.state});
+  final AppState state;
+
+  @override
+  State<StaffUsersPanel> createState() => _StaffUsersPanelState();
+}
+
+class _StaffUsersPanelState extends State<StaffUsersPanel> {
+  final username = TextEditingController();
+  final displayName = TextEditingController();
+  final password = TextEditingController();
+  Role selectedRole = Role.driver;
+
+  AppState get state => widget.state;
+
+  @override
+  void dispose() {
+    username.dispose();
+    displayName.dispose();
+    password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return adminCard(
+      context,
+      title: state.t('Staff users and roles', 'Staff users and roles'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 12, runSpacing: 12, children: [
+          SizedBox(
+            width: 180,
+            child: TextField(
+              controller: username,
+              decoration: InputDecoration(
+                  labelText: state.t('Username', 'Username')),
+            ),
+          ),
+          SizedBox(
+            width: 180,
+            child: TextField(
+              controller: displayName,
+              decoration: InputDecoration(
+                  labelText: state.t('Staff name', 'Staff name')),
+            ),
+          ),
+          SizedBox(
+            width: 180,
+            child: TextField(
+              controller: password,
+              obscureText: true,
+              decoration: InputDecoration(
+                  labelText: state.t('Password', 'Password')),
+            ),
+          ),
+          SizedBox(
+            width: 230,
+            child: DropdownButtonFormField<Role>(
+              value: selectedRole,
+              decoration: InputDecoration(labelText: state.t('User type', 'User type')),
+              items: [
+                for (final role in Role.values)
+                  DropdownMenuItem(
+                    value: role,
+                    child: Text(roleLabel(role, state.isArabic)),
+                  ),
+              ],
+              onChanged: (value) => setState(() => selectedRole = value ?? selectedRole),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: addUser,
+            icon: const Icon(Icons.person_add_alt),
+            label: Text(state.t('Create user', 'Create user')),
+          ),
+        ]),
+        const SizedBox(height: 18),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: [
+              dataLabel(state.t('Username', 'Username')),
+              dataLabel(state.t('Name', 'Name')),
+              dataLabel(state.t('Type', 'Type')),
+              dataLabel(state.t('Status', 'Status')),
+            ],
+            rows: [
+              for (final item in state.staffUsers)
+                DataRow(cells: [
+                  DataCell(Text(item.username)),
+                  DataCell(Text(item.displayName)),
+                  DataCell(Text(roleLabel(item.role, state.isArabic))),
+                  DataCell(Text(item.active ? state.t('Active', 'Active') : state.t('Off', 'Off'))),
+                ]),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Future<void> addUser() async {
+    final ok = await state.addStaffUser(StaffUser(
+      username: username.text.trim(),
+      password: password.text,
+      displayName: displayName.text.trim(),
+      role: selectedRole,
+    ));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok
+          ? state.t('User created.', 'User created.')
+          : state.t('Username already exists or fields are missing.', 'Username already exists or fields are missing.')),
+    ));
+    if (!ok) return;
+    username.clear();
+    displayName.clear();
+    password.clear();
+    setState(() {});
+  }
 }
 
 class AdminDashboard extends StatefulWidget {
@@ -2544,6 +3030,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
               '${complaints.length}'),
           metric(s.t('Branches', 'الفروع'), '${adminBranches.length}'),
         ]),
+        const SizedBox(height: 18),
+        BranchAssignmentCard(state: s),
+        const SizedBox(height: 18),
+        DriverAssignmentCard(state: s),
+        const SizedBox(height: 18),
+        OperationsTrackingPanel(state: s),
+        const SizedBox(height: 18),
+        StaffUsersPanel(state: s),
         const SizedBox(height: 18),
         Card(
             child: Padding(

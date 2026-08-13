@@ -15,19 +15,43 @@ WEB_ROOT = ROOT / 'build' / 'web'
 DATA_DIR = ROOT / 'data'
 SEED_FILE = DATA_DIR / 'seed_orders.json'
 ORDERS_FILE = DATA_DIR / 'orders.json'
+STAFF_USERS_FILE = DATA_DIR / 'staff_users.json'
 STORE_LOCK = Lock()
 DEFAULT_LAT = 29.3759
 DEFAULT_LNG = 47.9774
 
 
+DEFAULT_STAFF_USERS = [
+    {'username': 'admin', 'password': 'Admin123!', 'displayName': 'Admin', 'role': 'admin', 'active': True},
+    {'username': 'ops', 'password': 'Ops123!', 'displayName': 'Customer Service', 'role': 'employee', 'active': True},
+    {'username': 'reception-lead', 'password': 'ReceptionLead123!', 'displayName': 'Reception Lead', 'role': 'receptionistSupervisor', 'active': True},
+    {'username': 'driver-lead', 'password': 'DriverLead123!', 'displayName': 'Driver Lead', 'role': 'driverSupervisor', 'active': True},
+    {'username': 'reception', 'password': 'Reception123!', 'displayName': 'Aisha', 'role': 'receptionist', 'active': True},
+    {'username': 'fatima', 'password': 'Reception123!', 'displayName': 'Fatima', 'role': 'receptionist', 'active': True},
+    {'username': 'afroz', 'password': 'Tailor123!', 'displayName': 'AFROZ', 'role': 'tailor', 'active': True},
+    {'username': 'omar', 'password': 'Driver123!', 'displayName': 'Omar', 'role': 'driver', 'active': True},
+    {'username': 'khaled', 'password': 'Driver123!', 'displayName': 'Khaled', 'role': 'driver', 'active': True},
+]
+VALID_ROLES = {
+    'admin',
+    'employee',
+    'receptionistSupervisor',
+    'driverSupervisor',
+    'receptionist',
+    'tailor',
+    'driver',
+}
+
+
 def ensure_storage() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if ORDERS_FILE.exists():
-        return
-    if SEED_FILE.exists():
-        ORDERS_FILE.write_text(SEED_FILE.read_text(encoding='utf-8-sig'), encoding='utf-8')
-    else:
-        ORDERS_FILE.write_text('[]', encoding='utf-8')
+    if not ORDERS_FILE.exists():
+        if SEED_FILE.exists():
+            ORDERS_FILE.write_text(SEED_FILE.read_text(encoding='utf-8-sig'), encoding='utf-8')
+        else:
+            ORDERS_FILE.write_text('[]', encoding='utf-8')
+    if not STAFF_USERS_FILE.exists():
+        STAFF_USERS_FILE.write_text(json.dumps(DEFAULT_STAFF_USERS, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def normalize_order(order: dict) -> dict:
@@ -61,6 +85,76 @@ def save_orders(orders: list[dict]) -> None:
     ensure_storage()
     with STORE_LOCK:
         ORDERS_FILE.write_text(json.dumps(orders, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def normalize_staff_user(user: dict, include_password: bool = True) -> dict:
+    normalized = {
+        'username': str(user.get('username', '')).strip(),
+        'displayName': str(user.get('displayName', '')).strip(),
+        'role': str(user.get('role', 'employee')).strip(),
+        'active': bool(user.get('active', True)),
+    }
+    if normalized['role'] not in VALID_ROLES:
+        normalized['role'] = 'employee'
+    if include_password:
+        normalized['password'] = str(user.get('password', ''))
+    return normalized
+
+
+def public_staff_user(user: dict) -> dict:
+    return normalize_staff_user(user, include_password=False)
+
+
+def load_staff_users() -> list[dict]:
+    ensure_storage()
+    with STORE_LOCK:
+        payload = json.loads(STAFF_USERS_FILE.read_text(encoding='utf-8-sig'))
+    if not isinstance(payload, list):
+        return [normalize_staff_user(user) for user in DEFAULT_STAFF_USERS]
+    users = [normalize_staff_user(user) for user in payload if isinstance(user, dict)]
+    return users or [normalize_staff_user(user) for user in DEFAULT_STAFF_USERS]
+
+
+def save_staff_users(users: list[dict]) -> None:
+    ensure_storage()
+    normalized = [normalize_staff_user(user) for user in users]
+    with STORE_LOCK:
+        STAFF_USERS_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def authenticate_staff(username: str, password: str) -> dict | None:
+    normalized_username = username.strip().lower()
+    for user in load_staff_users():
+        if not user.get('active', True):
+            continue
+        if user.get('username', '').lower() == normalized_username and user.get('password') == password:
+            return public_staff_user(user)
+    return None
+
+
+def create_staff_user(payload: dict) -> dict:
+    username = str(payload.get('username', '')).strip()
+    password = str(payload.get('password', ''))
+    display_name = str(payload.get('displayName', '')).strip()
+    role = str(payload.get('role', 'employee')).strip()
+    if not username or not password or not display_name:
+        raise ValueError('Username, password and staff name are required.')
+    if role not in VALID_ROLES:
+        raise ValueError('Invalid staff role.')
+
+    users = load_staff_users()
+    if any(user.get('username', '').lower() == username.lower() for user in users):
+        raise ValueError('Username already exists.')
+    user = normalize_staff_user({
+        'username': username,
+        'password': password,
+        'displayName': display_name,
+        'role': role,
+        'active': bool(payload.get('active', True)),
+    })
+    users.append(user)
+    save_staff_users(users)
+    return public_staff_user(user)
 
 
 def next_order_id(orders: list[dict]) -> str:
@@ -268,6 +362,9 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/orders':
             self._send_json(load_orders())
             return
+        if parsed.path == '/api/staff-users':
+            self._send_json([public_staff_user(user) for user in load_staff_users()])
+            return
 
         if WEB_ROOT.exists():
             candidate = (WEB_ROOT / parsed.path.lstrip('/')).resolve()
@@ -301,6 +398,31 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/payments/webhook':
             # UPayments sends server-to-server payment updates here.
             self._send_json({'ok': True})
+            return
+
+        if parsed.path == '/api/login':
+            try:
+                payload = self._read_json_body()
+                user = authenticate_staff(str(payload.get('username', '')), str(payload.get('password', '')))
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+                return
+            if user is None:
+                self._send_json({'error': 'Incorrect username or password'}, status=401)
+            else:
+                self._send_json({'user': user})
+            return
+
+        if parsed.path == '/api/staff-users':
+            try:
+                payload = self._read_json_body()
+                user = create_staff_user(payload)
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+            except ValueError as exc:
+                self._send_json({'error': str(exc)}, status=400)
+            else:
+                self._send_json(user, status=201)
             return
 
         if parsed.path != '/api/orders':
