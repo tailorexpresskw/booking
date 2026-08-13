@@ -12,8 +12,10 @@ import urllib.parse
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / 'build' / 'web'
-DATA_DIR = ROOT / 'data'
-SEED_FILE = DATA_DIR / 'seed_orders.json'
+DATA_DIR = Path(os.environ.get('DATA_DIR', ROOT / 'data'))
+SEED_FILE = Path(os.environ.get('SEED_FILE', DATA_DIR / 'seed_orders.json'))
+FALLBACK_SEED_FILE = ROOT / 'seed_orders.json'
+REPO_SEED_FILE = ROOT / 'data' / 'seed_orders.json'
 ORDERS_FILE = DATA_DIR / 'orders.json'
 STAFF_USERS_FILE = DATA_DIR / 'staff_users.json'
 STORE_LOCK = Lock()
@@ -48,6 +50,10 @@ def ensure_storage() -> None:
     if not ORDERS_FILE.exists():
         if SEED_FILE.exists():
             ORDERS_FILE.write_text(SEED_FILE.read_text(encoding='utf-8-sig'), encoding='utf-8')
+        elif FALLBACK_SEED_FILE.exists():
+            ORDERS_FILE.write_text(FALLBACK_SEED_FILE.read_text(encoding='utf-8-sig'), encoding='utf-8')
+        elif REPO_SEED_FILE.exists():
+            ORDERS_FILE.write_text(REPO_SEED_FILE.read_text(encoding='utf-8-sig'), encoding='utf-8')
         else:
             ORDERS_FILE.write_text('[]', encoding='utf-8')
     if not STAFF_USERS_FILE.exists():

@@ -22,7 +22,9 @@ This workspace contains a Flutter web app for Tailor Express booking plus a ligh
 
 - Render will build the Flutter web app.
 - The runtime serves both the built web app and `/api/orders` from `server.py`.
-- Shared orders are stored in `data/orders.json` inside the container. Add a Render Disk mounted at `/app/data` if you need orders to survive service rebuilds.
+- Shared orders and runtime-created staff users are stored under `/app/data`.
+- The Blueprint includes a 1 GB Render Disk mounted at `/app/data` so new bookings survive redeploys and restarts.
+- Persistent disks require a paid Render instance type. The Blueprint uses `starter`.
 
 ## Staff portal
 

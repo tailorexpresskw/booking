@@ -32,6 +32,7 @@ WORKDIR /app
 COPY --from=build /app/build/web /app/build/web
 COPY server.py /app/server.py
 COPY data /app/data
+COPY data/seed_orders.json /app/seed_orders.json
 
 ENV PORT=10000
 EXPOSE 10000
