@@ -52,4 +52,6 @@ Set these environment variables on the server or Render:
 - `APP_BASE_URL`: public app URL used for return/cancel/webhook URLs, for example `https://tailor-express-booking.onrender.com`.
 - `PAYMENT_AMOUNT_KWD`: default home-service amount, currently `3.500`.
 
+When `UPAYMENTS_BASE_URL` is `https://sandboxapi.upayments.com`, the backend automatically uses UPayments' public non-whitelabel sandbox token `jtest123` so checkout can be tested even before live production credentials are ready. For real payments, replace `UPAYMENTS_BASE_URL` with the production UInterfaceV2 charge API base URL from UPayments; the backend will then use `UPAYMENTS_API_KEY`.
+
 Customers accept the policies first, then they are redirected to the hosted UPay checkout page.

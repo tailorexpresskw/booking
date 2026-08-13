@@ -203,11 +203,12 @@ def app_base_url(payload: dict) -> str:
 
 
 def create_upayments_payment(payload: dict) -> dict:
-    token = os.environ.get('UPAYMENTS_API_KEY', '').strip()
+    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
+    sandbox_mode = 'sandboxapi.upayments.com' in base_url.lower()
+    token = 'jtest123' if sandbox_mode else os.environ.get('UPAYMENTS_API_KEY', '').strip()
     if not token:
         raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
 
-    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
     amount = float(payload.get('amount') or payment_amount())
     order_id = str(payload.get('orderId', '')).strip() or next_order_id(load_orders())
     customer_name = str(payload.get('customer', 'Tailor Express Customer')).strip() or 'Tailor Express Customer'
