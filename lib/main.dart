@@ -1694,10 +1694,11 @@ class _BookingPageState extends State<BookingPage> {
               'تم فتح صفحة UPay وإنشاء الحجز.'))));
     } catch (error) {
       if (!mounted) return;
+      final detail = error.toString().replaceFirst('Exception: ', '');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(s.t(
-              'Booking created, but UPay is not configured yet.',
-              'تم إنشاء الحجز، لكن UPay غير مفعل بعد.'))));
+              'Booking created, but UPay did not return a checkout link: $detail',
+              'تم إنشاء الحجز، لكن UPay لم يرجع رابط الدفع: $detail'))));
       Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
     }
   }

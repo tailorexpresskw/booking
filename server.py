@@ -250,6 +250,8 @@ def create_upayments_payment(payload: dict) -> dict:
             'Accept': 'application/json',
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json',
+            # UPayments/Cloudflare blocks Python's default urllib signature.
+            'User-Agent': 'Mozilla/5.0 TailorExpressBooking/1.0',
         },
         method='POST',
     )
@@ -263,7 +265,12 @@ def create_upayments_payment(payload: dict) -> dict:
     data = result.get('data') if isinstance(result, dict) else None
     if not isinstance(data, dict):
         raise RuntimeError('Unexpected UPayments response.')
-    payment_url = data.get('link')
+    payment_url = (
+        data.get('link')
+        or data.get('paymentUrl')
+        or data.get('paymentURL')
+        or data.get('url')
+    )
     if not payment_url:
         raise RuntimeError('UPayments did not return a payment URL.')
     return {
