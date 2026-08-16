@@ -34,6 +34,7 @@ enum Stage {
 
 const ordersStorageKey = 'tailor_express_orders_v1';
 const staffUsersStorageKey = 'tailor_express_staff_users_v1';
+const areaPricesStorageKey = 'tailor_express_area_prices_v1';
 
 Role? roleFromSlug(String slug) {
   for (final role in Role.values) {
@@ -98,6 +99,11 @@ class Order {
     required this.service,
     required this.preference,
     required this.window,
+    this.invoiceNo = '',
+    this.deliveryPrice = 3.5,
+    this.totalAmount = 3.5,
+    this.paymentMethod = 'UPay',
+    this.paymentStatus = 'pending',
     this.branch = 'Pending assignment',
     this.receptionist = 'Pending assignment',
     required this.driver,
@@ -118,6 +124,11 @@ class Order {
   final String service;
   final String preference;
   final String window;
+  final String invoiceNo;
+  final double deliveryPrice;
+  final double totalAmount;
+  final String paymentMethod;
+  final String paymentStatus;
   final String branch;
   final String receptionist;
   final String driver;
@@ -142,6 +153,7 @@ class Order {
     Stage? stage,
     List<String>? timeline,
     String? notes,
+    String? paymentStatus,
   }) =>
       Order(
         id: id,
@@ -153,6 +165,11 @@ class Order {
         service: service,
         preference: preference,
         window: window,
+        invoiceNo: invoiceNo,
+        deliveryPrice: deliveryPrice,
+        totalAmount: totalAmount,
+        paymentMethod: paymentMethod,
+        paymentStatus: paymentStatus ?? this.paymentStatus,
         branch: branch ?? this.branch,
         receptionist: receptionist ?? this.receptionist,
         driver: driver ?? this.driver,
@@ -174,6 +191,11 @@ class Order {
         'service': service,
         'preference': preference,
         'window': window,
+        'invoiceNo': invoiceNo,
+        'deliveryPrice': deliveryPrice,
+        'totalAmount': totalAmount,
+        'paymentMethod': paymentMethod,
+        'paymentStatus': paymentStatus,
         'branch': branch,
         'receptionist': receptionist,
         'driver': driver,
@@ -195,6 +217,15 @@ class Order {
         service: json['service'] as String? ?? '',
         preference: json['preference'] as String? ?? '',
         window: json['window'] as String? ?? '',
+        invoiceNo: json['invoiceNo'] as String? ?? '',
+        deliveryPrice: (json['deliveryPrice'] as num?)?.toDouble() ??
+            (json['totalAmount'] as num?)?.toDouble() ??
+            3.5,
+        totalAmount: (json['totalAmount'] as num?)?.toDouble() ??
+            (json['deliveryPrice'] as num?)?.toDouble() ??
+            3.5,
+        paymentMethod: json['paymentMethod'] as String? ?? 'UPay',
+        paymentStatus: json['paymentStatus'] as String? ?? 'pending',
         branch: json['branch'] as String? ?? 'Pending assignment',
         receptionist: json['receptionist'] as String? ?? 'Pending assignment',
         driver: json['driver'] as String? ?? '',
@@ -250,6 +281,31 @@ class StaffUser {
         password: json['password'] as String? ?? '',
         displayName: json['displayName'] as String? ?? '',
         role: roleFromSlug(json['role'] as String? ?? '') ?? Role.employee,
+        active: json['active'] as bool? ?? true,
+      );
+}
+
+class DeliveryAreaPrice {
+  const DeliveryAreaPrice({
+    required this.areaEn,
+    required this.price,
+    this.active = true,
+  });
+
+  final String areaEn;
+  final double price;
+  final bool active;
+
+  Map<String, dynamic> toJson() => {
+        'areaEn': areaEn,
+        'price': price,
+        'active': active,
+      };
+
+  factory DeliveryAreaPrice.fromJson(Map<String, dynamic> json) =>
+      DeliveryAreaPrice(
+        areaEn: json['areaEn'] as String? ?? json['name'] as String? ?? '',
+        price: (json['price'] as num?)?.toDouble() ?? 5.0,
         active: json['active'] as bool? ?? true,
       );
 }
@@ -315,6 +371,8 @@ String timelineNow(String note) {
       '${now.day.toString().padLeft(2, '0')}-${now.month.toString().padLeft(2, '0')}-${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
   return '$stamp - $note';
 }
+
+String formatKwd(double value) => 'KD ${value.toStringAsFixed(3)}';
 
 final kuwaitAreas = <Area>[
   const Area('Abdali', 'العبدلي'),
@@ -411,6 +469,37 @@ final kuwaitAreas = <Area>[
   const Area('Yarmouk', 'اليرموك'),
   const Area('Zahra', 'الزهراء'),
 ];
+
+const highDeliveryPriceAreas = <String>{
+  'Abdali',
+  'Abu Futaira',
+  'Abu Halifa',
+  'Ahmadi',
+  'Ali Sabah Al-Salem',
+  'Egaila',
+  'Fahaheel',
+  'Farwaniya',
+  'Fintas',
+  'Firdous',
+  'Fnaitees',
+  'Hadiya',
+  'Jaber Al Ahmad',
+  'Jaber Al Ali',
+  'Jahra',
+  'Kabd',
+  'Mahboula',
+  'Mangaf',
+  'Sabah Al-Ahmad',
+  'Wafra',
+};
+
+List<DeliveryAreaPrice> defaultAreaPrices() => [
+      for (final area in kuwaitAreas)
+        DeliveryAreaPrice(
+          areaEn: area.en,
+          price: highDeliveryPriceAreas.contains(area.en) ? 7.0 : 5.0,
+        ),
+    ];
 
 const complaints = <Complaint>[
   Complaint(
@@ -529,8 +618,10 @@ const seedOrders = <Order>[
 class AppState extends ChangeNotifier {
   AppState() {
     _loadStaffUsers();
+    _loadAreaPrices();
     _loadOrders();
     unawaited(refreshStaffUsers());
+    unawaited(refreshAreaPrices());
     unawaited(refreshOrders());
     _poller = Timer.periodic(const Duration(seconds: 8), (_) {
       unawaited(refreshOrders(quiet: true));
@@ -543,6 +634,7 @@ class AppState extends ChangeNotifier {
   StaffUser? currentStaff;
   final List<Order> orders = [];
   final List<StaffUser> staffUsers = [];
+  final List<DeliveryAreaPrice> areaPrices = [];
   Timer? _poller;
 
   String t(String en, String ar) => isArabic ? ar : en;
@@ -717,6 +809,115 @@ class AppState extends ChangeNotifier {
 
   String get currentStaffName => currentStaff?.displayName ?? user;
 
+  List<Area> get activeAreas => kuwaitAreas.where((area) {
+        final price = areaPrice(area.en);
+        return price == null || price.active;
+      }).toList();
+
+  DeliveryAreaPrice? areaPrice(String areaEn) {
+    for (final item in areaPrices) {
+      if (item.areaEn.toLowerCase() == areaEn.trim().toLowerCase()) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  double deliveryPriceFor(String areaEn) =>
+      areaPrice(areaEn)?.price ??
+      (highDeliveryPriceAreas.contains(areaEn) ? 7.0 : 5.0);
+
+  bool areaIsActive(String areaEn) => areaPrice(areaEn)?.active ?? true;
+
+  void _loadAreaPrices() {
+    areaPrices.clear();
+    final raw = html.window.localStorage[areaPricesStorageKey];
+    if (raw == null || raw.isEmpty) {
+      areaPrices.addAll(defaultAreaPrices());
+      _saveAreaPrices();
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        areaPrices.addAll(decoded
+            .whereType<Object?>()
+            .map((item) => item is Map
+                ? DeliveryAreaPrice.fromJson(Map<String, dynamic>.from(item))
+                : null)
+            .whereType<DeliveryAreaPrice>());
+      }
+    } catch (_) {
+      areaPrices
+        ..clear()
+        ..addAll(defaultAreaPrices());
+    }
+    if (areaPrices.isEmpty) areaPrices.addAll(defaultAreaPrices());
+  }
+
+  void _saveAreaPrices() {
+    html.window.localStorage[areaPricesStorageKey] =
+        jsonEncode(areaPrices.map((item) => item.toJson()).toList());
+  }
+
+  Future<void> refreshAreaPrices({bool quiet = false}) async {
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/area-prices'),
+        method: 'GET',
+        requestHeaders: {'Accept': 'application/json'},
+      );
+      final decoded = jsonDecode(response.responseText ?? '[]');
+      if (decoded is! List) return;
+      areaPrices
+        ..clear()
+        ..addAll(decoded
+            .whereType<Object?>()
+            .map((item) => item is Map
+                ? DeliveryAreaPrice.fromJson(Map<String, dynamic>.from(item))
+                : null)
+            .whereType<DeliveryAreaPrice>());
+      if (areaPrices.isEmpty) areaPrices.addAll(defaultAreaPrices());
+      _saveAreaPrices();
+      notifyListeners();
+    } catch (_) {
+      if (!quiet) notifyListeners();
+    }
+  }
+
+  Future<void> updateAreaPrice(
+      String areaEn, double price, bool active) async {
+    final next = DeliveryAreaPrice(areaEn: areaEn, price: price, active: active);
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/area-prices/${Uri.encodeComponent(areaEn)}'),
+        method: 'PATCH',
+        sendData: jsonEncode(next.toJson()),
+        requestHeaders: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      final status = response.status ?? 0;
+      if (status >= 200 && status < 300 && response.responseText != null) {
+        _upsertAreaPrice(DeliveryAreaPrice.fromJson(
+            Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map)));
+        notifyListeners();
+        return;
+      }
+    } catch (_) {}
+    _upsertAreaPrice(next);
+    notifyListeners();
+  }
+
+  void _upsertAreaPrice(DeliveryAreaPrice next) {
+    areaPrices.removeWhere(
+        (item) => item.areaEn.toLowerCase() == next.areaEn.toLowerCase());
+    areaPrices.add(next);
+    areaPrices.sort((a, b) => a.areaEn.compareTo(b.areaEn));
+    _saveAreaPrices();
+  }
+
   String apiUrl(String path) {
     const configured = String.fromEnvironment('API_BASE', defaultValue: '');
     if (configured.isNotEmpty) {
@@ -789,7 +990,10 @@ class AppState extends ChangeNotifier {
           a.receptionist != b.receptionist ||
           a.driver != b.driver ||
           a.tailor != b.tailor ||
-          a.notes != b.notes) {
+          a.notes != b.notes ||
+          a.deliveryPrice != b.deliveryPrice ||
+          a.totalAmount != b.totalAmount ||
+          a.paymentStatus != b.paymentStatus) {
         return false;
       }
     }
@@ -886,6 +1090,7 @@ class AppState extends ChangeNotifier {
       'language': isArabic ? 'ar' : 'en',
     };
 
+    String? remoteError;
     try {
       final response = await html.HttpRequest.request(
         apiUrl('/api/orders'),
@@ -903,13 +1108,25 @@ class AppState extends ChangeNotifier {
         orders.removeWhere((order) => order.id == created.id);
         orders.insert(0, created);
         _saveOrders();
-        notifyListeners();
-        return created;
+          notifyListeners();
+          return created;
+      }
+      if (response.responseText != null && response.responseText!.isNotEmpty) {
+        final decoded = jsonDecode(response.responseText!);
+        if (decoded is Map && decoded['error'] != null) {
+          remoteError = decoded['error'].toString();
+        }
       }
     } catch (_) {}
+    if (remoteError != null) {
+      throw Exception(remoteError);
+    }
 
+    final deliveryPrice = deliveryPriceFor(area.en);
+    final localOrderNumber = DateTime.now().millisecondsSinceEpoch;
     final local = Order(
-      id: 'LOCAL-${DateTime.now().millisecondsSinceEpoch}',
+      id: 'LOCAL-$localOrderNumber',
+      invoiceNo: 'INV-LOCAL-$localOrderNumber',
       customer: customer,
       mobile: mobile,
       areaEn: area.en,
@@ -920,6 +1137,10 @@ class AppState extends ChangeNotifier {
       service: service,
       preference: preference,
       window: window,
+      deliveryPrice: deliveryPrice,
+      totalAmount: deliveryPrice,
+      paymentMethod: paymentMethod,
+      paymentStatus: 'pending',
       branch: t('Pending assignment',
           '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u062a\u0639\u064a\u064a\u0646'),
       receptionist: t('Pending assignment',
@@ -952,6 +1173,7 @@ class AppState extends ChangeNotifier {
     String? driver,
     String? tailor,
     Stage? stage,
+    String? paymentStatus,
     String? timelineNote,
   }) async {
     final index = orders.indexWhere((order) => order.id == id);
@@ -966,6 +1188,7 @@ class AppState extends ChangeNotifier {
       driver: driver,
       tailor: tailor,
       stage: stage,
+      paymentStatus: paymentStatus,
       timeline: nextTimeline,
     );
 
@@ -979,6 +1202,7 @@ class AppState extends ChangeNotifier {
           if (driver != null) 'driver': driver,
           if (tailor != null) 'tailor': tailor,
           if (stage != null) 'stage': stage.name,
+          if (paymentStatus != null) 'paymentStatus': paymentStatus,
           if (timelineNote != null) 'timelineNote': timelineNote,
         }),
         requestHeaders: {
@@ -1061,8 +1285,12 @@ class TailorWebApp extends StatelessWidget {
   Widget routeFor(Uri uri) {
     final path = uri.path.isEmpty ? '/' : uri.path;
     if (path == '/' || path == '/booking') return BookingPage(state: state);
-    if (path == '/track')
-      return TrackPage(state: state, initialId: uri.queryParameters['order']);
+    if (path == '/track') {
+      return TrackPage(
+          state: state,
+          initialId: uri.queryParameters['order'],
+          paymentResult: uri.queryParameters['payment']);
+    }
     if (path == '/staff') return StaffHubPage(state: state);
     if (path == '/login' || path == '/login/staff' || path.startsWith('/login/')) {
       return LoginPage(state: state);
@@ -1236,6 +1464,16 @@ class _BookingPageState extends State<BookingPage> {
       ? const ['خياط', 'خياطه']
       : const ['Men tailor', 'Women tailor'];
   String window = '5:00 PM - 6:00 PM';
+  double get selectedDeliveryPrice => widget.state.deliveryPriceFor(area.en);
+  String money(double value) => formatKwd(value);
+
+  void ensureActiveSelectedArea() {
+    final active = widget.state.activeAreas;
+    if (active.isNotEmpty &&
+        !active.any((item) => item.en.toLowerCase() == area.en.toLowerCase())) {
+      area = active.first;
+    }
+  }
 
   @override
   void dispose() {
@@ -1282,6 +1520,7 @@ class _BookingPageState extends State<BookingPage> {
 
   Widget bookingFormCard(double cardWidth) {
     final s = widget.state;
+    ensureActiveSelectedArea();
     final contentWidth = cardWidth - 44;
     final phone = cardWidth < 520;
     final wideField = phone ? contentWidth : 230.0;
@@ -1309,6 +1548,16 @@ class _BookingPageState extends State<BookingPage> {
                   field(mobile, s.t('Mobile number', 'رقم الهاتف'),
                       width: wideField, phone: true),
                   areaField(s, width: wideField),
+                  SizedBox(
+                    width: wideField,
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                          labelText: s.t('Delivery price',
+                              '\u0633\u0639\u0631 \u0627\u0644\u062a\u0648\u0635\u064a\u0644')),
+                      child: Text(money(selectedDeliveryPrice),
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
                   field(block, s.t('Block', 'قطعة'), width: halfField),
                   field(street, s.t('Street', 'شارع'), width: halfField),
                   field(building, s.t('Building / House', 'مبنى / منزل'),
@@ -1446,7 +1695,7 @@ class _BookingPageState extends State<BookingPage> {
             child: Row(
               children: [
                 Expanded(
-                    child: Text(area.name(s.isArabic),
+                    child: Text('${area.name(s.isArabic)} - ${money(selectedDeliveryPrice)}',
                         overflow: TextOverflow.ellipsis)),
                 const Icon(Icons.arrow_drop_down),
               ],
@@ -1457,6 +1706,7 @@ class _BookingPageState extends State<BookingPage> {
 
   Future<void> openAreaPicker() async {
     final s = widget.state;
+    final areas = s.activeAreas;
     final selected = await showModalBottomSheet<Area>(
       context: context,
       isScrollControlled: true,
@@ -1477,10 +1727,10 @@ class _BookingPageState extends State<BookingPage> {
               Expanded(
                 child: ListView.separated(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  itemCount: kuwaitAreas.length,
+                  itemCount: areas.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 6),
                   itemBuilder: (context, index) {
-                    final item = kuwaitAreas[index];
+                    final item = areas[index];
                     final chosen = item.en == area.en;
                     return ListTile(
                       shape: RoundedRectangleBorder(
@@ -1489,6 +1739,8 @@ class _BookingPageState extends State<BookingPage> {
                           ? const Color(0xFFFFF1CF)
                           : const Color(0xFFFFFCF7),
                       title: Text(item.name(s.isArabic)),
+                      subtitle: Text(
+                          '${s.t('Delivery', '\u0627\u0644\u062a\u0648\u0635\u064a\u0644')}: ${money(s.deliveryPriceFor(item.en))}'),
                       trailing:
                           chosen ? const Icon(Icons.check, color: gold) : null,
                       onTap: () => Navigator.of(context).pop(item),
@@ -1525,6 +1777,13 @@ class _BookingPageState extends State<BookingPage> {
 
   void submit() {
     if (!form.currentState!.validate()) return;
+    if (!widget.state.areaIsActive(area.en)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(widget.state.t(
+              'This area is currently unavailable.',
+              '\u0647\u0630\u0647 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d\u0629 \u062d\u0627\u0644\u064a\u0627.'))));
+      return;
+    }
     showPolicyGate();
   }
 
@@ -1614,7 +1873,7 @@ class _BookingPageState extends State<BookingPage> {
 
   Future<void> showPaymentGate() async {
     final s = widget.state;
-    const amount = 3.5;
+    final amount = selectedDeliveryPrice;
     final dialogWidth = dialogContentWidth(context, 540);
     final proceed = await showDialog<bool>(
       context: context,
@@ -1642,6 +1901,10 @@ class _BookingPageState extends State<BookingPage> {
                     Text(s.t('Home service visit', 'زيارة الخدمة المنزلية'),
                         style: const TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 6),
+                    Text('${s.t('Area', 'المنطقة')}: ${area.name(s.isArabic)}'),
+                    const SizedBox(height: 6),
+                    Text('${s.t('Amount', 'المبلغ')}: ${money(amount)}'),
+                    if (amount < 0)
                     Text(s.t('Amount: KD 3.500', 'المبلغ: 3.500 د.ك')),
                   ],
                 ),
@@ -1667,21 +1930,21 @@ class _BookingPageState extends State<BookingPage> {
     final mergedNotes = notes.text.trim().isEmpty
         ? paymentNote
         : '${notes.text.trim()} | $paymentNote';
-    final order = await widget.state.createBooking(
-      customer: name.text.trim(),
-      mobile: mobile.text.trim(),
-      area: area,
-      block: block.text.trim(),
-      street: street.text.trim(),
-      building: building.text.trim(),
-      service: service,
-      preference: preference,
-      window: window,
-      notes: mergedNotes,
-      paymentMethod: paid,
-    );
-
+    Order? order;
     try {
+      order = await widget.state.createBooking(
+        customer: name.text.trim(),
+        mobile: mobile.text.trim(),
+        area: area,
+        block: block.text.trim(),
+        street: street.text.trim(),
+        building: building.text.trim(),
+        service: service,
+        preference: preference,
+        window: window,
+        notes: mergedNotes,
+        paymentMethod: paid,
+      );
       final paymentUrl = await widget.state.createPaymentLink(
         order: order,
         amount: amount,
@@ -1699,7 +1962,9 @@ class _BookingPageState extends State<BookingPage> {
           content: Text(s.t(
               'Booking created, but UPay did not return a checkout link: $detail',
               'تم إنشاء الحجز، لكن UPay لم يرجع رابط الدفع: $detail'))));
-      Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
+      if (order != null) {
+        Navigator.of(context).pushReplacementNamed('/track?order=${order.id}');
+      }
     }
   }
   Widget policyCard(PolicyRecord policy) {
@@ -1737,9 +2002,10 @@ class _BookingPageState extends State<BookingPage> {
 }
 
 class TrackPage extends StatefulWidget {
-  const TrackPage({super.key, required this.state, this.initialId});
+  const TrackPage({super.key, required this.state, this.initialId, this.paymentResult});
   final AppState state;
   final String? initialId;
+  final String? paymentResult;
 
   @override
   State<TrackPage> createState() => _TrackPageState();
@@ -1761,6 +2027,14 @@ class _TrackPageState extends State<TrackPage> {
     if (initial.isEmpty) return;
     order = widget.state.byId(initial);
     await widget.state.refreshOrders(quiet: true);
+    final result = (widget.paymentResult ?? '').toLowerCase();
+    if (result == 'success') {
+      await widget.state.updateOrder(initial,
+          paymentStatus: 'paid', timelineNote: 'UPay payment confirmed');
+    } else if (result == 'failed') {
+      await widget.state.updateOrder(initial,
+          paymentStatus: 'failed', timelineNote: 'UPay payment failed');
+    }
     if (!mounted) return;
     setState(() => order = widget.state.byId(initial));
   }
@@ -2690,12 +2964,21 @@ Widget workflowOrderCard(BuildContext context, AppState state, Order order,
       Text(order.address),
       const SizedBox(height: 10),
       Wrap(spacing: 8, runSpacing: 8, children: [
+        Chip(label: Text('${state.t('Invoice', 'الفاتورة')}: ${order.invoiceNo.isEmpty ? order.id : order.invoiceNo}')),
+        Chip(label: Text('${state.t('Delivery price', 'سعر التوصيل')}: ${formatKwd(order.totalAmount)}')),
+        Chip(label: Text('${state.t('Payment', 'الدفع')}: ${order.paymentStatus}')),
         Chip(label: Text('${state.t('Branch', 'الفرع')}: ${order.branch}')),
         Chip(
             label: Text(
                 '${state.t('Receptionist', 'الاستقبال')}: ${order.receptionist}')),
         Chip(label: Text('${state.t('Driver', 'السائق')}: ${order.driver}')),
       ]),
+      const SizedBox(height: 10),
+      OutlinedButton.icon(
+        onPressed: () => openInvoicePrint(order, state),
+        icon: const Icon(Icons.picture_as_pdf),
+        label: Text(state.t('Print customer bill', 'طباعة فاتورة العميل')),
+      ),
       if (actions.isNotEmpty) ...[
         const SizedBox(height: 10),
         Wrap(spacing: 10, runSpacing: 10, children: actions),
@@ -2799,6 +3082,234 @@ Future<String?> showStaffSelectionDialog(
       ),
     ),
   );
+}
+
+void openInvoicePrint(Order order, AppState state) {
+  const escape = HtmlEscape();
+  final invoiceNo = order.invoiceNo.isEmpty ? order.id : order.invoiceNo;
+  final rows = <String, String>{
+    'Invoice': invoiceNo,
+    'Order ID': order.id,
+    'Customer': order.customer,
+    'Mobile': order.mobile,
+    'Area': order.area(state.isArabic),
+    'Address': order.address,
+    'Service': order.service,
+    'Tailor preference': order.preference,
+    'Visit window': order.window,
+    'Delivery price': formatKwd(order.deliveryPrice),
+    'Total': formatKwd(order.totalAmount),
+    'Payment method': order.paymentMethod,
+    'Payment status': order.paymentStatus,
+  };
+  final rowsHtml = rows.entries
+      .map((entry) =>
+          '<tr><th>${escape.convert(entry.key)}</th><td>${escape.convert(entry.value)}</td></tr>')
+      .join();
+  final notes = order.notes.trim().isEmpty ? '-' : order.notes.trim();
+  final invoiceHtml = '''
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${escape.convert(invoiceNo)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #17130e; margin: 32px; }
+    .brand { color: #c7a04b; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; }
+    h1 { margin: 8px 0 4px; font-size: 28px; }
+    .meta { color: #6c6254; margin-bottom: 22px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+    th, td { text-align: left; border-bottom: 1px solid #e8ddc8; padding: 10px 8px; }
+    th { width: 34%; background: #fff8eb; }
+    .total { margin-top: 22px; padding: 16px; background: #17130e; color: white; border-radius: 12px; font-size: 20px; }
+    .notes { margin-top: 22px; padding: 14px; border: 1px solid #e8ddc8; border-radius: 12px; }
+    @media print { button { display: none; } body { margin: 18mm; } }
+  </style>
+</head>
+<body>
+  <button onclick="window.print()">Print / Save PDF</button>
+  <div class="brand">Tailor Express</div>
+  <h1>Customer Bill</h1>
+  <div class="meta">Generated ${DateTime.now().toLocal()}</div>
+  <table>$rowsHtml</table>
+  <div class="total">Total: ${escape.convert(formatKwd(order.totalAmount))}</div>
+  <div class="notes"><strong>Notes</strong><br>${escape.convert(notes)}</div>
+  <script>setTimeout(() => window.print(), 300);</script>
+</body>
+</html>
+''';
+  final blob = html.Blob([invoiceHtml], 'text/html');
+  final url = html.Url.createObjectUrlFromBlob(blob);
+  html.window.open(url, '_blank');
+}
+
+class AreaPricesPanel extends StatefulWidget {
+  const AreaPricesPanel({super.key, required this.state});
+  final AppState state;
+
+  @override
+  State<AreaPricesPanel> createState() => _AreaPricesPanelState();
+}
+
+class _AreaPricesPanelState extends State<AreaPricesPanel> {
+  final search = TextEditingController();
+
+  AppState get state => widget.state;
+
+  @override
+  void initState() {
+    super.initState();
+    search.addListener(() => setState(() {}));
+    unawaited(state.refreshAreaPrices(quiet: true));
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = search.text.trim().toLowerCase();
+    final areas = kuwaitAreas.where((area) {
+      return query.isEmpty ||
+          area.en.toLowerCase().contains(query) ||
+          area.name(state.isArabic).toLowerCase().contains(query);
+    }).toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(state.t('Delivery Prices', 'أسعار التوصيل'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              SizedBox(
+                width: 260,
+                child: TextField(
+                  controller: search,
+                  decoration: InputDecoration(
+                      labelText: state.t('Search area', 'بحث عن منطقة')),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => unawaited(state.refreshAreaPrices()),
+                icon: const Icon(Icons.refresh),
+                label: Text(state.t('Refresh', 'تحديث')),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(state.t(
+              'The selected active area price is shown to customers before payment and is used as the UPay amount.',
+              'سعر المنطقة المفعلة يظهر للعميل قبل الدفع ويستخدم كمبلغ UPay.')),
+          const SizedBox(height: 14),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columns: [
+                dataLabel(state.t('Area', 'المنطقة')),
+                dataLabel(state.t('Price', 'السعر')),
+                dataLabel(state.t('Status', 'الحالة')),
+                dataLabel(state.t('Action', 'الإجراء')),
+              ],
+              rows: [
+                for (final area in areas)
+                  _areaRow(context, area),
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  DataRow _areaRow(BuildContext context, Area area) {
+    final price = state.areaPrice(area.en) ??
+        DeliveryAreaPrice(
+            areaEn: area.en,
+            price: highDeliveryPriceAreas.contains(area.en) ? 7.0 : 5.0);
+    return DataRow(cells: [
+      DataCell(Text(area.name(state.isArabic))),
+      DataCell(Text(formatKwd(price.price))),
+      DataCell(badge(
+          price.active ? state.t('Active', 'مفعلة') : state.t('Inactive', 'متوقفة'),
+          price.active ? const Color(0xFF2D8A57) : const Color(0xFF9A3A2F))),
+      DataCell(Wrap(spacing: 8, children: [
+        OutlinedButton(
+          onPressed: () => editArea(context, price),
+          child: Text(state.t('Edit', 'تعديل')),
+        ),
+        OutlinedButton(
+          onPressed: () => unawaited(state.updateAreaPrice(
+              price.areaEn, price.price, !price.active)),
+          child: Text(price.active
+              ? state.t('Deactivate', 'إيقاف')
+              : state.t('Activate', 'تفعيل')),
+        ),
+      ])),
+    ]);
+  }
+
+  Future<void> editArea(BuildContext context, DeliveryAreaPrice area) async {
+    final controller =
+        TextEditingController(text: area.price.toStringAsFixed(3));
+    var active = area.active;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('${state.t('Edit delivery price', 'تعديل سعر التوصيل')} - ${area.areaEn}'),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                controller: controller,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                    labelText: state.t('Price KWD', 'السعر بالدينار')),
+              ),
+              const SizedBox(height: 10),
+              SwitchListTile(
+                value: active,
+                onChanged: (value) => setDialogState(() => active = value),
+                title: Text(state.t('Area active', 'المنطقة مفعلة')),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(state.t('Cancel', 'إلغاء'))),
+            ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(state.t('Save', 'حفظ'))),
+          ],
+        ),
+      ),
+    );
+    if (saved != true) {
+      controller.dispose();
+      return;
+    }
+    final value = double.tryParse(controller.text.trim());
+    controller.dispose();
+    if (value == null || value < 0) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Enter a valid price.', 'أدخل سعرا صحيحا.'))));
+      return;
+    }
+    await state.updateAreaPrice(area.areaEn, value, active);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(state.t('Delivery price saved.', 'تم حفظ سعر التوصيل.'))));
+  }
 }
 
 class StaffUsersPanel extends StatefulWidget {
@@ -3037,6 +3548,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         DriverAssignmentCard(state: s),
         const SizedBox(height: 18),
         OperationsTrackingPanel(state: s),
+        const SizedBox(height: 18),
+        AreaPricesPanel(state: s),
         const SizedBox(height: 18),
         StaffUsersPanel(state: s),
         const SizedBox(height: 18),

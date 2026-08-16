@@ -22,7 +22,7 @@ This workspace contains a Flutter web app for Tailor Express booking plus a ligh
 
 - Render will build the Flutter web app.
 - The runtime serves both the built web app and `/api/orders` from `server.py`.
-- Shared orders and runtime-created staff users are stored under `/app/data`.
+- Shared orders, delivery area prices and runtime-created staff users are stored under `/app/data`.
 - The Blueprint includes a 1 GB Render Disk mounted at `/app/data` so new bookings survive redeploys and restarts.
 - Persistent disks require a paid Render instance type. The Blueprint uses `starter`.
 
@@ -55,3 +55,7 @@ Set these environment variables on the server or Render:
 When `UPAYMENTS_BASE_URL` is `https://sandboxapi.upayments.com`, the backend automatically uses UPayments' public non-whitelabel sandbox token `jtest123` so checkout can be tested even before live production credentials are ready. For real payments, replace `UPAYMENTS_BASE_URL` with the production UInterfaceV2 charge API base URL from UPayments; the backend will then use `UPAYMENTS_API_KEY`.
 
 Customers accept the policies first, then they are redirected to the hosted UPay checkout page.
+
+## Delivery prices and bills
+
+Admin users can edit delivery prices, activate/deactivate areas, and print customer bills from the dashboard. The selected active area price is shown to customers before payment and is used as the UPay checkout amount. When UPay redirects back with `payment=success`, the order is marked paid and the bill remains available in the dashboard. The price table is persisted in `/app/data/area_prices.json`, so keep the Render Disk mounted at `/app/data`.

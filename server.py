@@ -18,9 +18,129 @@ FALLBACK_SEED_FILE = ROOT / 'seed_orders.json'
 REPO_SEED_FILE = ROOT / 'data' / 'seed_orders.json'
 ORDERS_FILE = DATA_DIR / 'orders.json'
 STAFF_USERS_FILE = DATA_DIR / 'staff_users.json'
+AREA_PRICES_FILE = DATA_DIR / 'area_prices.json'
 STORE_LOCK = Lock()
 DEFAULT_LAT = 29.3759
 DEFAULT_LNG = 47.9774
+
+DEFAULT_AREA_NAMES = [
+    'Abdali',
+    'Abdullah Al-Mubarak',
+    'Abdullah Al-Salem',
+    'Abu Al Hasaniya',
+    'Abu Futaira',
+    'Abu Halifa',
+    'Adailiya',
+    'Adan',
+    'Ahmadi',
+    'Ali Sabah Al-Salem',
+    'Amghara',
+    'Andalus',
+    'Ardiya',
+    'Ardiya Industrial',
+    'Ashbelia',
+    'Bayan',
+    'Bneid Al Gar',
+    'Daiya',
+    'Dasma',
+    'Dhajeej',
+    'Doha',
+    'Egaila',
+    'Fahaheel',
+    'Faiha',
+    'Farwaniya',
+    'Fintas',
+    'Firdous',
+    'Fnaitees',
+    'Granada',
+    'Hadiya',
+    'Hateen',
+    'Hawally',
+    'Jaber Al Ahmad',
+    'Jaber Al Ali',
+    'Jabriya',
+    'Jahra',
+    'Jleeb Al-Shuyoukh',
+    'Qadsiya',
+    'Qairawan',
+    'Kaifan',
+    'Kabd',
+    'Khaitan',
+    'Khaldiya',
+    'Kuwait City',
+    'Mahboula',
+    'Mangaf',
+    'Mansouriya',
+    'Messila',
+    'Mirqab',
+    'Mishref',
+    'Mubarak Al-Abdullah',
+    'Mubarak Al-Kabeer',
+    'Nassem',
+    'North West Sulaibikhat',
+    'Nuzha',
+    'Omariya',
+    'Oyoun',
+    'Qibla',
+    'Qortuba',
+    'Rabia',
+    'Rawda',
+    'Rehab',
+    'Riggae',
+    'Riqqa',
+    'Rumaithiya',
+    'Saad Al-Abdullah',
+    'Sabah Al-Ahmad',
+    'Sabah Al-Nasser',
+    'Sabah Al-Salem',
+    'Sabahiya',
+    'Sabhan',
+    'Salam',
+    'Salmiya',
+    'Salwa',
+    'Shaab',
+    'Sharq',
+    'Shamiya',
+    'Shuhada',
+    'Shuwaikh',
+    'Shuwaikh Industrial',
+    'Siddeeq',
+    'South Abdullah Al-Mubarak',
+    'Sulaibiya',
+    'Sulaibiya Industrial',
+    'Sulaibikhat',
+    'Surra',
+    'Taima',
+    'Wafra',
+    'Waha',
+    'West Abu Fatira',
+    'West Abdullah Mubarak',
+    'Yarmouk',
+    'Zahra',
+]
+
+HIGH_PRICE_AREAS = {
+    'Abdali',
+    'Abu Futaira',
+    'Abu Halifa',
+    'Ahmadi',
+    'Ali Sabah Al-Salem',
+    'Egaila',
+    'Fahaheel',
+    'Farwaniya',
+    'Fintas',
+    'Firdous',
+    'Fnaitees',
+    'Hadiya',
+    'Jaber Al Ahmad',
+    'Jaber Al Ali',
+    'Jahra',
+    'Kabd',
+    'Mahboula',
+    'Mangaf',
+    'Sabah Al-Ahmad',
+    'Wafra',
+}
 
 
 DEFAULT_STAFF_USERS = [
@@ -58,6 +178,86 @@ def ensure_storage() -> None:
             ORDERS_FILE.write_text('[]', encoding='utf-8')
     if not STAFF_USERS_FILE.exists():
         STAFF_USERS_FILE.write_text(json.dumps(DEFAULT_STAFF_USERS, ensure_ascii=False, indent=2), encoding='utf-8')
+    if not AREA_PRICES_FILE.exists():
+        AREA_PRICES_FILE.write_text(json.dumps(default_area_prices(), ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def default_area_prices() -> list[dict]:
+    return [
+        {
+            'areaEn': name,
+            'price': 7.0 if name in HIGH_PRICE_AREAS else 5.0,
+            'active': True,
+        }
+        for name in DEFAULT_AREA_NAMES
+    ]
+
+
+def normalize_area_price(item: dict) -> dict:
+    area = str(item.get('areaEn', item.get('name', ''))).strip()
+    try:
+        price = float(item.get('price', 5.0))
+    except (TypeError, ValueError):
+        price = 5.0
+    return {
+        'areaEn': area,
+        'price': max(price, 0.0),
+        'active': bool(item.get('active', True)),
+    }
+
+
+def load_area_prices() -> list[dict]:
+    ensure_storage()
+    with STORE_LOCK:
+        payload = json.loads(AREA_PRICES_FILE.read_text(encoding='utf-8-sig'))
+    if not isinstance(payload, list):
+        return default_area_prices()
+    stored = {
+        normalize_area_price(item)['areaEn'].lower(): normalize_area_price(item)
+        for item in payload
+        if isinstance(item, dict) and str(item.get('areaEn', item.get('name', ''))).strip()
+    }
+    for item in default_area_prices():
+        stored.setdefault(item['areaEn'].lower(), item)
+    return sorted(stored.values(), key=lambda item: item['areaEn'].lower())
+
+
+def save_area_prices(items: list[dict]) -> None:
+    ensure_storage()
+    normalized = [normalize_area_price(item) for item in items if normalize_area_price(item)['areaEn']]
+    with STORE_LOCK:
+        AREA_PRICES_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def area_price_for(area_en: str) -> dict | None:
+    normalized = area_en.strip().lower()
+    for item in load_area_prices():
+        if item['areaEn'].lower() == normalized:
+            return item
+    return None
+
+
+def update_area_price(area_en: str, payload: dict) -> dict:
+    target = area_en.strip()
+    if not target:
+        raise ValueError('Area is required.')
+    prices = load_area_prices()
+    area = next((item for item in prices if item['areaEn'].lower() == target.lower()), None)
+    if area is None:
+        area = {'areaEn': target, 'price': 5.0, 'active': True}
+        prices.append(area)
+    if 'price' in payload:
+        try:
+            price = float(payload['price'])
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Price must be a number.') from exc
+        if price < 0:
+            raise ValueError('Price cannot be negative.')
+        area['price'] = price
+    if 'active' in payload:
+        area['active'] = bool(payload['active'])
+    save_area_prices(prices)
+    return normalize_area_price(area)
 
 
 def normalize_order(order: dict) -> dict:
@@ -68,6 +268,9 @@ def normalize_order(order: dict) -> dict:
         'tailor': 'Pending assignment',
         'stage': 'newBooking',
         'timeline': [],
+        'invoiceNo': '',
+        'paymentMethod': 'UPay',
+        'paymentStatus': 'pending',
     }
     for key, value in defaults.items():
         if key == 'timeline':
@@ -75,6 +278,19 @@ def normalize_order(order: dict) -> dict:
                 order[key] = []
         elif not str(order.get(key, '')).strip():
             order[key] = value
+    if 'deliveryPrice' not in order:
+        area_price = area_price_for(str(order.get('areaEn', '')))
+        order['deliveryPrice'] = area_price['price'] if area_price else payment_amount()
+    try:
+        order['deliveryPrice'] = float(order.get('deliveryPrice') or 0)
+    except (TypeError, ValueError):
+        order['deliveryPrice'] = 0.0
+    if 'totalAmount' not in order:
+        order['totalAmount'] = order['deliveryPrice']
+    try:
+        order['totalAmount'] = float(order.get('totalAmount') or order['deliveryPrice'])
+    except (TypeError, ValueError):
+        order['totalAmount'] = order['deliveryPrice']
     return order
 
 
@@ -209,8 +425,12 @@ def create_upayments_payment(payload: dict) -> dict:
     if not token:
         raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
 
-    amount = float(payload.get('amount') or payment_amount())
     order_id = str(payload.get('orderId', '')).strip() or next_order_id(load_orders())
+    existing_order = next((item for item in load_orders() if str(item.get('id')) == order_id), None)
+    if existing_order is not None:
+        amount = float(existing_order.get('totalAmount') or existing_order.get('deliveryPrice') or payment_amount())
+    else:
+        amount = float(payload.get('amount') or payment_amount())
     customer_name = str(payload.get('customer', 'Tailor Express Customer')).strip() or 'Tailor Express Customer'
     service = str(payload.get('service', 'Tailor Express home service')).strip() or 'Tailor Express home service'
     language = str(payload.get('language', 'en')).strip().lower()
@@ -300,6 +520,13 @@ def build_order(payload: dict, orders: list[dict]) -> dict:
     window = str(payload.get('window', '')).strip()
     notes = str(payload.get('notes', '')).strip()
     language = str(payload.get('language', 'en')).strip().lower()
+    area_price = area_price_for(area_en)
+    if area_price is None:
+        raise ValueError('Selected area is not available.')
+    if not area_price.get('active', True):
+        raise ValueError('Selected area is currently not available.')
+    delivery_price = float(area_price.get('price') or 0.0)
+    order_id = next_order_id(orders)
 
     if language == 'ar':
         address = f'{area_ar}، قطعة {block}، شارع {street}، مبنى {building}'
@@ -315,7 +542,8 @@ def build_order(payload: dict, orders: list[dict]) -> dict:
         ]
 
     return {
-        'id': next_order_id(orders),
+        'id': order_id,
+        'invoiceNo': f'INV-{order_id.replace("TE-", "")}',
         'customer': customer,
         'mobile': mobile,
         'areaEn': area_en,
@@ -332,6 +560,10 @@ def build_order(payload: dict, orders: list[dict]) -> dict:
         'lat': DEFAULT_LAT,
         'lng': DEFAULT_LNG,
         'notes': notes,
+        'deliveryPrice': delivery_price,
+        'totalAmount': delivery_price,
+        'paymentMethod': str(payload.get('paymentMethod', 'UPay')).strip() or 'UPay',
+        'paymentStatus': 'pending',
         'timeline': timeline,
     }
 
@@ -375,6 +607,9 @@ class TailorHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == '/api/orders':
             self._send_json(load_orders())
+            return
+        if parsed.path == '/api/area-prices':
+            self._send_json(load_area_prices())
             return
         if parsed.path == '/api/staff-users':
             self._send_json([public_staff_user(user) for user in load_staff_users()])
@@ -439,6 +674,18 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self._send_json(user, status=201)
             return
 
+        if parsed.path == '/api/area-prices':
+            try:
+                payload = self._read_json_body()
+                area = update_area_price(str(payload.get('areaEn', '')), payload)
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+            except ValueError as exc:
+                self._send_json({'error': str(exc)}, status=400)
+            else:
+                self._send_json(area, status=201)
+            return
+
         if parsed.path != '/api/orders':
             self.send_error(404)
             return
@@ -456,7 +703,11 @@ class TailorHandler(SimpleHTTPRequestHandler):
             return
 
         orders = load_orders()
-        order = build_order(payload, orders)
+        try:
+            order = build_order(payload, orders)
+        except ValueError as exc:
+            self._send_json({'error': str(exc)}, status=400)
+            return
         orders.insert(0, order)
         save_orders(orders)
         self._send_json(order, status=201)
@@ -464,6 +715,19 @@ class TailorHandler(SimpleHTTPRequestHandler):
     def do_PATCH(self) -> None:
         parsed = urlparse(self.path)
         match = re.fullmatch(r'/api/orders/([^/]+)', parsed.path)
+        area_match = re.fullmatch(r'/api/area-prices/([^/]+)', parsed.path)
+        if area_match:
+            try:
+                payload = self._read_json_body()
+                area = update_area_price(unquote(area_match.group(1)), payload)
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+            except ValueError as exc:
+                self._send_json({'error': str(exc)}, status=400)
+            else:
+                self._send_json(area)
+            return
+
         if not match:
             self.send_error(404)
             return
@@ -481,7 +745,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
             self._send_json({'error': 'Order not found'}, status=404)
             return
 
-        allowed = {'branch', 'receptionist', 'driver', 'tailor', 'stage'}
+        allowed = {'branch', 'receptionist', 'driver', 'tailor', 'stage', 'paymentStatus'}
         for key in allowed:
             if key in payload:
                 order[key] = str(payload.get(key, '')).strip() or 'Pending assignment'

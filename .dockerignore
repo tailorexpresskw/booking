@@ -7,3 +7,4 @@ booking_deploy_key*
 generate_deploy_key.cmd
 data/orders.json
 data/staff_users.json
+data/area_prices.json
