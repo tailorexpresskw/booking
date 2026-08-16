@@ -1687,7 +1687,7 @@ class _BookingPageState extends State<BookingPage> {
         amount: amount,
         method: paid,
       );
-      await launchUrl(Uri.parse(paymentUrl), webOnlyWindowName: '_self');
+      html.window.location.assign(paymentUrl);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(s.t('UPay checkout opened. Booking created.',
