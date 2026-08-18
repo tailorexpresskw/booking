@@ -748,10 +748,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setArabic(bool value) {
+  void setArabic(bool value, {bool notify = true}) {
     if (isArabic == value) return;
     isArabic = value;
-    notifyListeners();
+    if (notify) notifyListeners();
   }
 
   void _loadStaffUsers() {
@@ -1565,20 +1565,28 @@ class TailorWebApp extends StatelessWidget {
 
   Widget routeFor(Uri uri) {
     final path = uri.path.isEmpty ? '/' : uri.path;
-    if (path == '/' || path == '/booking') return BookingPage(state: state);
+    if (path == '/' || path == '/booking') {
+      state.setArabic(true, notify: false);
+      return BookingPage(state: state);
+    }
     if (path == '/track') {
       return TrackPage(
           state: state,
           initialId: uri.queryParameters['order'],
           paymentResult: uri.queryParameters['payment']);
     }
-    if (path == '/staff') return StaffHubPage(state: state);
+    if (path == '/staff') {
+      state.setArabic(false, notify: false);
+      return StaffHubPage(state: state);
+    }
     if (path == '/login' || path == '/login/staff' || path.startsWith('/login/')) {
+      state.setArabic(false, notify: false);
       return LoginPage(state: state);
     }
     if (path == '/dashboard' ||
         path == '/dashboard/staff' ||
         path.startsWith('/dashboard/')) {
+      state.setArabic(false, notify: false);
       if (!state.signedIn || state.role == null) {
         return LockedPage(state: state, role: null);
       }
