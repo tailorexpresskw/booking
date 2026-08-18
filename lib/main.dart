@@ -2993,6 +2993,26 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         role == Role.tailor;
   }
 
+  List<Stage> get allowedStatusStages {
+    final role = state.role;
+    if (role == Role.driver || role == Role.driverSupervisor) {
+      return [Stage.outForDelivery, Stage.delivered];
+    }
+    if (role == Role.receptionist || role == Role.receptionistSupervisor) {
+      return [Stage.completed, Stage.onShop, Stage.ready];
+    }
+    if (role == Role.tailor) {
+      return [Stage.onShop, Stage.ready];
+    }
+    return [
+      Stage.completed,
+      Stage.onShop,
+      Stage.ready,
+      Stage.outForDelivery,
+      Stage.delivered,
+    ];
+  }
+
   Future<void> assignBranchFromTable(BuildContext context, Order order) async {
     final assignment =
         await showReceptionAssignmentDialog(context, state, order);
@@ -3035,26 +3055,26 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     ));
   }
 
-  Future<void> setStatusFromTable(Order order, Stage stage) async {
+  Future<void> setStatusFromTable(BuildContext context, Order order, Stage stage) async {
+    final readyBy = stage == Stage.ready
+        ? await showReadyByDialog(context, state)
+        : null;
+    if (stage == Stage.ready && readyBy == null) return;
     await state.updateOrder(
       order.id,
       stage: stage,
       timelineNote:
-          'Status updated to ${stageLabel(stage, false)} from orders dashboard',
+          stage == Stage.ready
+              ? 'Order marked ready by $readyBy'
+              : 'Status updated to ${stageLabel(stage, false)} from orders dashboard',
     );
   }
 
   Widget statusMenu(Order order) {
-    final statusStages = [
-      Stage.completed,
-      Stage.onShop,
-      Stage.ready,
-      Stage.outForDelivery,
-      Stage.delivered,
-    ];
+    final statusStages = allowedStatusStages;
     return PopupMenuButton<Stage>(
       tooltip: state.t('Change status', 'تغيير الحالة'),
-      onSelected: (stage) => setStatusFromTable(order, stage),
+      onSelected: (stage) => setStatusFromTable(context, order, stage),
       itemBuilder: (context) => [
         for (final stage in statusStages)
           PopupMenuItem(
@@ -3103,12 +3123,13 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                 : () => assignDriverFromTable(context, order),
           ),
           if (canChangeStatus) statusMenu(order),
-          compactTableButton(
-            label: state.t('Delivered', 'تم التسليم'),
-            onPressed: isDelivered(order) || !canChangeStatus
-                ? null
-                : () => setStatusFromTable(order, Stage.delivered),
-          ),
+          if (allowedStatusStages.contains(Stage.delivered))
+            compactTableButton(
+              label: state.t('Delivered', 'تم التسليم'),
+              onPressed: isDelivered(order) || !canChangeStatus
+                  ? null
+                  : () => setStatusFromTable(context, order, Stage.delivered),
+            ),
           compactTableButton(
             label: state.t('Bill', 'فاتورة'),
             onPressed: () => openInvoicePrint(order, state),
@@ -3127,7 +3148,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         if (value == 'bill') openInvoicePrint(order, state);
         if (value.startsWith('stage:')) {
           final stage = stageFromKey(value.substring('stage:'.length));
-          setStatusFromTable(order, stage);
+          setStatusFromTable(context, order, stage);
         }
       },
       itemBuilder: (context) => [
@@ -3142,30 +3163,11 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             child: Text(state.t('Assign driver', 'تعيين السائق')),
           ),
         if (canChangeStatus && !isDelivered(order))
-          PopupMenuItem(
-            value: 'stage:${Stage.completed.name}',
-            child: Text(stageLabel(Stage.completed, state.isArabic)),
-          ),
-        if (canChangeStatus && !isDelivered(order))
-          PopupMenuItem(
-            value: 'stage:${Stage.onShop.name}',
-            child: Text(stageLabel(Stage.onShop, state.isArabic)),
-          ),
-        if (canChangeStatus && !isDelivered(order))
-          PopupMenuItem(
-            value: 'stage:${Stage.ready.name}',
-            child: Text(stageLabel(Stage.ready, state.isArabic)),
-          ),
-        if (canChangeStatus && !isDelivered(order))
-          PopupMenuItem(
-            value: 'stage:${Stage.outForDelivery.name}',
-            child: Text(stageLabel(Stage.outForDelivery, state.isArabic)),
-          ),
-        if (canChangeStatus && !isDelivered(order))
-          PopupMenuItem(
-            value: 'stage:${Stage.delivered.name}',
-            child: Text(stageLabel(Stage.delivered, state.isArabic)),
-          ),
+          for (final stage in allowedStatusStages)
+            PopupMenuItem(
+              value: 'stage:${stage.name}',
+              child: Text(stageLabel(stage, state.isArabic)),
+            ),
         PopupMenuItem(
           value: 'bill',
           child: Text(state.t('Print bill', 'طباعة الفاتورة')),
@@ -3615,13 +3617,6 @@ class DriverOperationsPanel extends StatelessWidget {
                 icon: const Icon(Icons.map_outlined),
                 label: const Text('Google Maps'),
               ),
-              if (!order.hasReceptionist)
-                OutlinedButton.icon(
-                  onPressed: () => _selectReceptionist(context, order),
-                  icon: const Icon(Icons.support_agent),
-                  label: Text(
-                      state.t('Select receptionist', 'اختيار موظف الاستقبال')),
-                ),
               if (order.stage != Stage.outForDelivery && !isDelivered(order))
                 ElevatedButton.icon(
                   onPressed: () => _setStage(context, order, Stage.outForDelivery,
@@ -3648,29 +3643,6 @@ class DriverOperationsPanel extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content:
               Text(state.t('Tracking link copied.', 'تم نسخ رابط التتبع.'))));
-    }
-  }
-
-  Future<void> _selectReceptionist(BuildContext context, Order order) async {
-    final receptionist = await showStaffSelectionDialog(
-      context,
-      state,
-      title: state.t('Select receptionist', 'اختيار موظف الاستقبال'),
-      label: state.t('Receptionist', 'الاستقبال'),
-      items: state.staffNamesForRole(Role.receptionist,
-          branch: order.hasBranch ? order.branch : null, availableOnly: true),
-      initialValue: order.hasReceptionist ? order.receptionist : null,
-    );
-    if (receptionist == null) return;
-    await state.updateOrder(
-      order.id,
-      receptionist: receptionist,
-      timelineNote: 'Driver selected receptionist $receptionist',
-    );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:
-              Text(state.t('Receptionist saved.', 'تم حفظ موظف الاستقبال.'))));
     }
   }
 
@@ -3753,6 +3725,8 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
         OperationsTrackingPanel(state: state),
         const SizedBox(height: 18),
         StaffUsersPanel(state: state),
+        const SizedBox(height: 18),
+        BranchReceptionistsPanel(state: state),
       ]),
     );
   }
@@ -3875,11 +3849,16 @@ class ReceptionistDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final staffName = state.currentStaffName.toLowerCase();
+    final staffBranch = state.currentStaff?.branch.trim().toLowerCase() ?? '';
     final branchOrders = state.orders
-        .where((o) =>
-            !isDelivered(o) &&
-            o.hasBranch &&
-            o.receptionist.toLowerCase() == staffName)
+        .where((o) {
+          if (isDelivered(o) || !o.hasBranch) return false;
+          if (staffBranch.isNotEmpty &&
+              o.branch.trim().toLowerCase() == staffBranch) {
+            return true;
+          }
+          return o.receptionist.toLowerCase() == staffName;
+        })
         .toList();
     final ready = branchOrders.where((o) => o.stage == Stage.ready).length;
     return Shell(
@@ -3950,7 +3929,17 @@ class ReceptionistDashboard extends StatelessWidget {
 
   Future<void> _setStage(BuildContext context, Order order, Stage stage,
       String timelineNote) async {
-    await state.updateOrder(order.id, stage: stage, timelineNote: timelineNote);
+    final readyBy = stage == Stage.ready
+        ? await showReadyByDialog(context, state)
+        : null;
+    if (stage == Stage.ready && readyBy == null) return;
+    await state.updateOrder(
+      order.id,
+      stage: stage,
+      timelineNote: stage == Stage.ready
+          ? 'Order marked ready by $readyBy'
+          : timelineNote,
+    );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
@@ -4117,6 +4106,114 @@ Future<String?> showStaffSelectionDialog(
       ),
     ),
   );
+}
+
+Future<String?> showReadyByDialog(BuildContext context, AppState state) async {
+  final controller = TextEditingController(text: state.currentStaffName);
+  final result = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(state.t('Who marked it ready?', 'من جهز الطلب؟')),
+      content: SizedBox(
+        width: 380,
+        child: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: state.t('Receptionist / branch staff name',
+                'اسم موظفة الاستقبال / موظف الفرع'),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: Text(state.t('Cancel', 'إلغاء')),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final name = controller.text.trim();
+            if (name.isEmpty) return;
+            Navigator.of(dialogContext).pop(name);
+          },
+          child: Text(state.t('Save ready', 'حفظ جاهز')),
+        ),
+      ],
+    ),
+  );
+  controller.dispose();
+  return result;
+}
+
+Future<void> showBranchReceptionistsDialog(
+  BuildContext context,
+  AppState state,
+  BranchRecord branch,
+) async {
+  final selected = state.staffForRole(Role.receptionist).where((user) =>
+      user.branch.trim().toLowerCase() == branch.name.toLowerCase()).map(
+      (user) => user.username).toSet();
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text('${state.t('Branch receptionists', 'موظفو استقبال الفرع')} - ${branch.name}'),
+        content: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              for (final user in state.staffForRole(Role.receptionist))
+                CheckboxListTile(
+                  value: selected.contains(user.username),
+                  onChanged: (value) {
+                    setDialogState(() {
+                      if (value ?? false) {
+                        selected.add(user.username);
+                      } else {
+                        selected.remove(user.username);
+                      }
+                    });
+                  },
+                  title: Text(user.displayName),
+                  subtitle: Text(user.branch.trim().isEmpty
+                      ? state.t('No branch', 'بدون فرع')
+                      : user.branch),
+                ),
+              if (state.staffForRole(Role.receptionist).isEmpty)
+                Text(state.t('Create receptionist users first.',
+                    'أنشئ مستخدمي الاستقبال أولاً.')),
+            ]),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(state.t('Cancel', 'إلغاء')),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(state.t('Save', 'حفظ')),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (saved != true) return;
+  for (final user in state.staffForRole(Role.receptionist)) {
+    final shouldBeInBranch = selected.contains(user.username);
+    final isInBranch =
+        user.branch.trim().toLowerCase() == branch.name.toLowerCase();
+    if (shouldBeInBranch == isInBranch) continue;
+    await state.updateStaffUser(
+      user.copyWith(branch: shouldBeInBranch ? branch.name : ''),
+    );
+  }
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(state.t('Branch receptionists saved.',
+          'تم حفظ موظفي استقبال الفرع.')),
+    ));
+  }
 }
 
 void openInvoicePrint(Order order, AppState state) {
@@ -4649,6 +4746,68 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
   }
 }
 
+class BranchReceptionistsPanel extends StatelessWidget {
+  const BranchReceptionistsPanel({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return adminCard(
+      context,
+      title: state.t('Receptionists by branch', 'موظفو الاستقبال حسب الفرع'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(state.t(
+          'Assign receptionist users to branches so branch orders and Ready actions stay linked to the correct branch.',
+          'عيّن مستخدمي الاستقبال للفروع حتى تبقى طلبات الفرع وإجراءات الجاهزية مرتبطة بالفرع الصحيح.',
+        )),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final branch in adminBranches)
+              SizedBox(
+                width: 360,
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(branch.name,
+                              style:
+                                  Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 8),
+                          Text(
+                            state
+                                    .staffNamesForRole(Role.receptionist,
+                                        branch: branch.name)
+                                    .isEmpty
+                                ? state.t('No receptionists assigned.',
+                                    'لا يوجد موظفو استقبال معينون.')
+                                : state
+                                    .staffNamesForRole(Role.receptionist,
+                                        branch: branch.name)
+                                    .join(', '),
+                          ),
+                          const SizedBox(height: 12),
+                          compactTableButton(
+                            label: state.t('Set receptionists',
+                                'تعيين الاستقبال'),
+                            onPressed: () => showBranchReceptionistsDialog(
+                                context, state, branch),
+                          ),
+                        ]),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ]),
+    );
+  }
+}
+
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key, required this.state});
   final AppState state;
@@ -4993,26 +5152,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     DataCell(Text(branch.contact)),
                     DataCell(SizedBox(
                         width: 220,
-                        child: Text(
-                          s
-                                  .staffNamesForRole(Role.receptionist,
-                                      branch: branch.name)
-                                  .isEmpty
-                              ? '-'
-                              : s
-                                  .staffNamesForRole(Role.receptionist,
-                                      branch: branch.name)
-                                  .join(', '),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ))),
+                        child: Builder(builder: (context) {
+                          final names = s.staffNamesForRole(
+                              Role.receptionist,
+                              branch: branch.name);
+                          return Text(
+                            names.isEmpty ? '-' : names.join(', '),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          );
+                        }))),
                     DataCell(
                         Text(s.isArabic ? branch.statusAr : branch.statusEn)),
-                    DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-                      tinyActionButton(s.t('Edit', 'تعديل')),
-                      const SizedBox(width: 6),
-                      tinyActionButton(s.t('Delete', 'حذف')),
-                    ])),
+                    DataCell(SizedBox(
+                      width: 280,
+                      child: Wrap(spacing: 8, runSpacing: 8, children: [
+                        compactTableButton(
+                          label: s.t('Set receptionists', 'تعيين الاستقبال'),
+                          onPressed: () =>
+                              showBranchReceptionistsDialog(context, s, branch),
+                        ),
+                        compactTableButton(
+                          label: s.t('Edit', 'تعديل'),
+                          onPressed: () => notifySaved(
+                              s.t('Branch edit is ready.', 'تعديل الفرع جاهز.')),
+                        ),
+                      ]),
+                    )),
                   ]),
               ],
             ),
