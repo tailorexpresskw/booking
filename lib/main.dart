@@ -451,6 +451,12 @@ String timelineNow(String note) {
 
 String formatKwd(double value) => 'KD ${value.toStringAsFixed(3)}';
 
+String formatVisitDate(DateTime value) {
+  final day = value.day.toString().padLeft(2, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  return '$day-$month-${value.year}';
+}
+
 final kuwaitAreas = <Area>[
   const Area('Abdali', 'العبدلي'),
   const Area('Abdullah Al-Mubarak', 'عبدالله المبارك'),
@@ -1611,8 +1617,11 @@ class _BookingPageState extends State<BookingPage> {
       ? const ['خياط', 'خياطه']
       : const ['Men tailor', 'Women tailor'];
   String window = '5:00 PM - 6:00 PM';
+  DateTime visitDate = DateTime.now().add(const Duration(days: 1));
   double get selectedDeliveryPrice => widget.state.deliveryPriceFor(area.en);
   String money(double value) => formatKwd(value);
+  String get visitDateText => formatVisitDate(visitDate);
+  String get selectedVisitWindow => '$visitDateText, $window';
 
   void ensureActiveSelectedArea() {
     final active = widget.state.activeAreas;
@@ -1740,6 +1749,7 @@ class _BookingPageState extends State<BookingPage> {
                       ],
                       (v) => setState(() => window = v!),
                       width: wideField),
+                  visitDateField(s, width: wideField),
                 ],
               ),
               const SizedBox(height: 12),
@@ -1922,6 +1932,40 @@ class _BookingPageState extends State<BookingPage> {
         ),
       );
 
+  Widget visitDateField(AppState s, {required double width}) => SizedBox(
+        width: width,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: pickVisitDate,
+          child: InputDecorator(
+            decoration:
+                InputDecoration(labelText: s.t('Visit day', 'يوم الزيارة')),
+            child: Row(
+              children: [
+                Expanded(child: Text(visitDateText)),
+                const Icon(Icons.calendar_month),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  Future<void> pickVisitDate() async {
+    final now = DateTime.now();
+    final firstDate = DateTime(now.year, now.month, now.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: visitDate.isBefore(firstDate) ? firstDate : visitDate,
+      firstDate: firstDate,
+      lastDate: firstDate.add(const Duration(days: 30)),
+      selectableDayPredicate: (day) {
+        // The admin schedule currently shows all days active unless changed.
+        return true;
+      },
+    );
+    if (picked != null) setState(() => visitDate = picked);
+  }
+
   void submit() {
     if (!form.currentState!.validate()) return;
     if (!widget.state.areaIsActive(area.en)) {
@@ -2050,6 +2094,8 @@ class _BookingPageState extends State<BookingPage> {
                     const SizedBox(height: 6),
                     Text('${s.t('Area', 'المنطقة')}: ${area.name(s.isArabic)}'),
                     const SizedBox(height: 6),
+                    Text('${s.t('Visit', 'الزيارة')}: $selectedVisitWindow'),
+                    const SizedBox(height: 6),
                     Text('${s.t('Amount', 'المبلغ')}: ${money(amount)}'),
                     if (amount < 0)
                     Text(s.t('Amount: KD 3.500', 'المبلغ: 3.500 د.ك')),
@@ -2088,7 +2134,7 @@ class _BookingPageState extends State<BookingPage> {
         building: building.text.trim(),
         service: service,
         preference: preference,
-        window: window,
+        window: selectedVisitWindow,
         notes: mergedNotes,
         paymentMethod: paid,
       );
