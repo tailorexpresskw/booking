@@ -1616,14 +1616,17 @@ class Shell extends StatelessWidget {
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final compact = width < 640;
+    final shellDirection = public ? state.dir : TextDirection.ltr;
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.all(compact ? 14 : 24),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1240),
-              child: Column(
+        child: Directionality(
+          textDirection: shellDirection,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(compact ? 14 : 24),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1240),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Wrap(
@@ -1695,6 +1698,7 @@ class Shell extends StatelessWidget {
                     const SizedBox(height: 20),
                     body,
                   ]),
+              ),
             ),
           ),
         ),
