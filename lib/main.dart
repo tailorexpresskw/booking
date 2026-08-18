@@ -2761,6 +2761,9 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
+            dataRowMinHeight: 64,
+            dataRowMaxHeight: 78,
+            columnSpacing: 34,
             columns: [
               dataLabel('ID'),
               dataLabel(state.t('Visit Date & Time', 'موعد الزيارة')),
@@ -3653,6 +3656,9 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
+              dataRowMinHeight: 64,
+              dataRowMaxHeight: 78,
+              columnSpacing: 38,
               columns: [
                 dataLabel(state.t('Area', 'المنطقة')),
                 dataLabel(state.t('Price', 'السعر')),
@@ -3681,19 +3687,23 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
       DataCell(badge(
           price.active ? state.t('Active', 'مفعلة') : state.t('Inactive', 'متوقفة'),
           price.active ? const Color(0xFF2D8A57) : const Color(0xFF9A3A2F))),
-      DataCell(Wrap(spacing: 8, children: [
-        OutlinedButton(
-          onPressed: () => editArea(context, price),
-          child: Text(state.t('Edit', 'تعديل')),
-        ),
-        OutlinedButton(
-          onPressed: () => unawaited(state.updateAreaPrice(
-              price.areaEn, price.price, !price.active)),
-          child: Text(price.active
-              ? state.t('Deactivate', 'إيقاف')
-              : state.t('Activate', 'تفعيل')),
-        ),
-      ])),
+      DataCell(SizedBox(
+        width: 250,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          compactTableButton(
+            label: state.t('Edit', 'تعديل'),
+            onPressed: () => editArea(context, price),
+          ),
+          const SizedBox(width: 8),
+          compactTableButton(
+            label: price.active
+                ? state.t('Deactivate', 'إيقاف')
+                : state.t('Activate', 'تفعيل'),
+            onPressed: () => unawaited(state.updateAreaPrice(
+                price.areaEn, price.price, !price.active)),
+          ),
+        ]),
+      )),
     ]);
   }
 
@@ -3877,19 +3887,24 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
                   DataCell(Text(item.availableToday ? state.t('Yes', 'Yes') : state.t('No', 'No'))),
                   DataCell(Text(item.homeServiceToday ? state.t('Yes', 'Yes') : state.t('No', 'No'))),
                   DataCell(Text(item.active ? state.t('Active', 'Active') : state.t('Off', 'Off'))),
-                  DataCell(Wrap(spacing: 8, children: [
-                    OutlinedButton(
-                      onPressed: () => editUser(item),
-                      child: Text(state.t('Edit', 'Edit')),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => unawaited(state.updateStaffUser(
-                          item.copyWith(availableToday: !item.availableToday))),
-                      child: Text(item.availableToday
-                          ? state.t('Set unavailable', 'Set unavailable')
-                          : state.t('Set available', 'Set available')),
-                    ),
-                  ])),
+                  DataCell(SizedBox(
+                    width: 330,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      compactTableButton(
+                        label: state.t('Edit', 'Edit'),
+                        onPressed: () => editUser(item),
+                      ),
+                      const SizedBox(width: 8),
+                      compactTableButton(
+                        label: item.availableToday
+                            ? state.t('Set unavailable', 'Set unavailable')
+                            : state.t('Set available', 'Set available'),
+                        onPressed: () => unawaited(state.updateStaffUser(item
+                            .copyWith(
+                                availableToday: !item.availableToday))),
+                      ),
+                    ]),
+                  )),
                 ]),
             ],
           ),
@@ -4024,6 +4039,17 @@ class AdminDashboard extends StatefulWidget {
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
+enum AdminSection {
+  orders,
+  assignments,
+  history,
+  users,
+  prices,
+  schedule,
+  branches,
+  policies
+}
+
 class _AdminDashboardState extends State<AdminDashboard> {
   late bool appointmentEnabled;
   late final TextEditingController slotListController;
@@ -4065,6 +4091,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     'Saturday'
   };
   int selectedPolicyIndex = 0;
+  AdminSection selectedSection = AdminSection.orders;
 
   AppState get s => widget.state;
 
@@ -4125,32 +4152,307 @@ class _AdminDashboardState extends State<AdminDashboard> {
           metric(s.t('Branches', 'الفروع'), '${adminBranches.length}'),
         ]),
         const SizedBox(height: 18),
-        Wrap(spacing: 10, runSpacing: 10, children: [
-          sectionChip(s.t('Orders', 'الطلبات')),
-          sectionChip(s.t('Assignments', 'التعيينات')),
-          sectionChip(s.t('Delivery', 'التوصيل')),
-          sectionChip(s.t('Users', 'المستخدمون')),
-          sectionChip(s.t('Prices', 'الأسعار')),
-          sectionChip(s.t('History', 'السجل')),
-        ]),
+        adminSectionNav(),
         const SizedBox(height: 18),
-        OrdersDashboardTable(
-          state: s,
-          orders: s.orders,
-          title: s.t('Orders dashboard', 'لوحة الطلبات'),
+        if (selectedSection == AdminSection.orders)
+          OrdersDashboardTable(
+            state: s,
+            orders: s.orders,
+            title: s.t('Orders dashboard', 'لوحة الطلبات'),
+          ),
+        if (selectedSection == AdminSection.assignments) ...[
+          BranchAssignmentCard(state: s),
+          const SizedBox(height: 18),
+          DriverAssignmentCard(state: s),
+        ],
+        if (selectedSection == AdminSection.history)
+          OperationsTrackingPanel(state: s),
+        if (selectedSection == AdminSection.prices)
+          AreaPricesPanel(state: s),
+        if (selectedSection == AdminSection.users)
+          StaffUsersPanel(state: s),
+        if (selectedSection == AdminSection.schedule)
+          adminCard(
+          context,
+          title: s.t('Booking Schedule', 'جدول الحجوزات'),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            settingsBlock(
+              context,
+              title: s.t('Appointment Module', 'وحدة المواعيد'),
+              action: smallSaveButton(() => notifySaved(s.t(
+                  'Appointment module saved.', 'تم حفظ إعداد وحدة المواعيد.'))),
+              child: SizedBox(
+                width: 220,
+                child: DropdownButtonFormField<bool>(
+                  value: appointmentEnabled,
+                  decoration: InputDecoration(
+                      labelText: s.t('Module status', 'حالة الوحدة')),
+                  items: [
+                    DropdownMenuItem(
+                        value: true, child: Text(s.t('ON', 'تشغيل'))),
+                    DropdownMenuItem(
+                        value: false, child: Text(s.t('OFF', 'إيقاف'))),
+                  ],
+                  onChanged: (value) =>
+                      setState(() => appointmentEnabled = value ?? true),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            settingsBlock(
+              context,
+              title: s.t('Time Slots', 'الفترات الزمنية'),
+              action: smallSaveButton(() => notifySaved(
+                  s.t('Time slots saved.', 'تم حفظ الفترات الزمنية.'))),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 420,
+                      child: TextField(
+                        controller: slotListController,
+                        decoration: InputDecoration(
+                            labelText: s.t('Time slots', 'الفترات الزمنية'),
+                            hintText: '12pm,1pm,2pm,3pm'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                        s.t('Note: once you save new time slots, the previous setup will be removed.',
+                            'ملاحظة: عند حفظ الفترات الجديدة سيتم استبدال الإعداد السابق.'),
+                        style: const TextStyle(color: Colors.black54)),
+                  ]),
+            ),
+            const SizedBox(height: 16),
+            settingsBlock(
+              context,
+              title: s.t('Working Days', 'أيام العمل'),
+              action: smallSaveButton(() => notifySaved(
+                  s.t('Working days saved.', 'تم حفظ أيام العمل.'))),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final day in dayKeys)
+                    SizedBox(
+                      width: 130,
+                      child: CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: workingDays.contains(day),
+                        title: Text(dayLabel(day),
+                            style: const TextStyle(fontSize: 13)),
+                        onChanged: (value) {
+                          setState(() {
+                            if (value ?? false) {
+                              workingDays.add(day);
+                            } else {
+                              workingDays.remove(day);
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            settingsBlock(
+              context,
+              title: s.t('Capacity Generator', 'توليد السعة'),
+              action: OutlinedButton(
+                  onPressed: () => notifySaved(s.t(
+                      'Rows generated for working days.',
+                      'تم إنشاء الصفوف لأيام العمل.')),
+                  child: Text(s.t('Continue', 'متابعة'))),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        s.t('Select a date range and click Continue to generate rows.',
+                            'اختر نطاق التاريخ ثم اضغط متابعة لإنشاء الصفوف.'),
+                        style: const TextStyle(color: Colors.black54)),
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 12, runSpacing: 12, children: [
+                      SizedBox(
+                          width: 240,
+                          child: TextField(
+                              controller: dateRangeController,
+                              decoration: InputDecoration(
+                                  labelText:
+                                      s.t('Date range', 'نطاق التاريخ')))),
+                      for (var i = 0; i < slotKeys.length; i++)
+                        SizedBox(
+                            width: 105,
+                            child: TextField(
+                                controller: capacityControllers[i],
+                                decoration:
+                                    InputDecoration(labelText: slotKeys[i]))),
+                    ]),
+                    const SizedBox(height: 10),
+                    Text(
+                        s.t('Note: only working days will be generated.',
+                            'ملاحظة: سيتم إنشاء أيام العمل فقط.'),
+                        style: const TextStyle(color: Colors.black54)),
+                  ]),
+            ),
+            const SizedBox(height: 16),
+            settingsBlock(
+              context,
+              title: s.t('Existing Schedule Records', 'سجلات الجدول الحالية'),
+              action: smallSaveButton(() => notifySaved(
+                  s.t('Schedule records saved.', 'تم حفظ سجلات الجدول.'))),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: [
+                    dataLabel(s.t('Date', 'التاريخ')),
+                    dataLabel(s.t('Day', 'اليوم')),
+                    for (final slot in slotKeys) dataLabel(slot),
+                  ],
+                  rows: [
+                    for (final row in scheduleRows)
+                      DataRow(cells: [
+                        DataCell(Text(row.date)),
+                        DataCell(Text(s.isArabic ? row.dayAr : row.dayEn)),
+                        for (final count in row.capacities)
+                          DataCell(SizedBox(
+                              width: 44,
+                              child: TextField(
+                                  controller:
+                                      TextEditingController(text: '$count'),
+                                  decoration: const InputDecoration(
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 8))))),
+                      ]),
+                  ],
+                ),
+              ),
+            ),
+          ]),
         ),
-        const SizedBox(height: 18),
-        BranchAssignmentCard(state: s),
-        const SizedBox(height: 18),
-        DriverAssignmentCard(state: s),
-        const SizedBox(height: 18),
-        OperationsTrackingPanel(state: s),
-        const SizedBox(height: 18),
-        AreaPricesPanel(state: s),
-        const SizedBox(height: 18),
-        StaffUsersPanel(state: s),
-        const SizedBox(height: 18),
-        Card(
+        if (selectedSection == AdminSection.branches)
+          adminCard(
+          context,
+          title: s.t('Branches', 'الفروع'),
+          action: Wrap(spacing: 10, runSpacing: 10, children: [
+            SizedBox(
+                width: 220,
+                child: TextField(
+                    controller: branchSearchController,
+                    decoration:
+                        InputDecoration(labelText: s.t('Search', 'بحث')))),
+            ElevatedButton(
+                onPressed: () => notifySaved(s.t(
+                    'Add branch flow is ready.', 'نموذج إضافة الفرع جاهز.')),
+                child: Text(s.t('Add Branch', 'إضافة فرع'))),
+          ]),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              dataRowMinHeight: 64,
+              dataRowMaxHeight: 92,
+              columns: [
+                dataLabel(s.t('Branch Name', 'اسم الفرع')),
+                dataLabel(s.t('Address / Location', 'العنوان / الموقع')),
+                dataLabel(s.t('Working Hours', 'ساعات العمل')),
+                dataLabel(s.t('Contact No.', 'رقم التواصل')),
+                dataLabel(s.t('Status', 'الحالة')),
+                dataLabel(s.t('Action', 'الإجراء')),
+              ],
+              rows: [
+                for (final branch in filteredBranches)
+                  DataRow(cells: [
+                    DataCell(Text(branch.name)),
+                    DataCell(SizedBox(
+                        width: 210,
+                        child: Text(branch.locationLink,
+                            overflow: TextOverflow.ellipsis))),
+                    DataCell(SizedBox(width: 220, child: Text(branch.hours))),
+                    DataCell(Text(branch.contact)),
+                    DataCell(
+                        Text(s.isArabic ? branch.statusAr : branch.statusEn)),
+                    DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
+                      tinyActionButton(s.t('Edit', 'تعديل')),
+                      const SizedBox(width: 6),
+                      tinyActionButton(s.t('Delete', 'حذف')),
+                    ])),
+                  ]),
+              ],
+            ),
+          ),
+        ),
+        if (selectedSection == AdminSection.policies)
+          adminCard(
+          context,
+          title: s.t('Edit Policy', 'تعديل السياسة'),
+          action: OutlinedButton(
+              onPressed: () => notifySaved(
+                  s.t('Back to policy list.', 'العودة إلى قائمة السياسات.')),
+              child: Text(s.t('Back to list', 'العودة للقائمة'))),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Wrap(spacing: 10, runSpacing: 10, children: [
+              for (var i = 0; i < policies.length; i++)
+                ChoiceChip(
+                  label: Text(
+                      s.isArabic ? policies[i].nameAr : policies[i].nameEn),
+                  selected: selectedPolicyIndex == i,
+                  selectedColor: const Color(0xFFFFF1CF),
+                  onSelected: (_) => setState(() => _loadPolicy(i)),
+                ),
+            ]),
+            const SizedBox(height: 18),
+            Wrap(spacing: 16, runSpacing: 16, children: [
+              SizedBox(
+                width: 480,
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                          controller: policyEnNameController,
+                          decoration: InputDecoration(
+                              labelText: s.t('Policy Name (English)',
+                                  'اسم السياسة بالإنجليزية'))),
+                      const SizedBox(height: 12),
+                      TextField(
+                          controller: policyEnDetailController,
+                          maxLines: 16,
+                          decoration: InputDecoration(
+                              labelText: s.t(
+                                  'Detail (English)', 'التفاصيل بالإنجليزية'))),
+                    ]),
+              ),
+              SizedBox(
+                width: 480,
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                          controller: policyArNameController,
+                          textAlign: TextAlign.right,
+                          decoration: InputDecoration(
+                              labelText: s.t('Policy Name (Arabic)',
+                                  'اسم السياسة بالعربية'))),
+                      const SizedBox(height: 12),
+                      TextField(
+                          controller: policyArDetailController,
+                          textAlign: TextAlign.right,
+                          maxLines: 16,
+                          decoration: InputDecoration(
+                              labelText:
+                                  s.t('Detail (Arabic)', 'التفاصيل بالعربية'))),
+                    ]),
+              ),
+            ]),
+            const SizedBox(height: 16),
+            smallSaveButton(savePolicy),
+          ]),
+        ),
+        if (showLegacyAdminBlocks) ...[
+          Card(
             child: Padding(
                 padding: const EdgeInsets.all(22),
                 child: Column(
@@ -4452,9 +4754,41 @@ class _AdminDashboardState extends State<AdminDashboard> {
             smallSaveButton(savePolicy),
           ]),
         ),
+        ],
       ]),
     );
   }
+
+  Widget adminSectionNav() {
+    return Wrap(spacing: 10, runSpacing: 10, children: [
+      adminSectionButton(AdminSection.orders, s.t('Orders', 'الطلبات')),
+      adminSectionButton(
+          AdminSection.assignments, s.t('Driver assignment', 'تعيين السائق')),
+      adminSectionButton(AdminSection.history, s.t('History', 'السجل')),
+      adminSectionButton(AdminSection.users, s.t('Users', 'المستخدمون')),
+      adminSectionButton(
+          AdminSection.prices, s.t('Delivery prices', 'أسعار التوصيل')),
+      adminSectionButton(
+          AdminSection.schedule, s.t('Booking Schedule', 'جدول الحجوزات')),
+      adminSectionButton(AdminSection.branches, s.t('Branches', 'الفروع')),
+      adminSectionButton(AdminSection.policies, s.t('Policies', 'السياسات')),
+    ]);
+  }
+
+  Widget adminSectionButton(AdminSection section, String label) {
+    final selected = selectedSection == section;
+    return FilledButton.tonal(
+      style: FilledButton.styleFrom(
+        backgroundColor: selected ? maroon : const Color(0xFFFFF1CF),
+        foregroundColor: selected ? Colors.white : const Color(0xFF8A6726),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      ),
+      onPressed: () => setState(() => selectedSection = section),
+      child: Text(label),
+    );
+  }
+
+  bool get showLegacyAdminBlocks => false;
 
   List<BranchRecord> get filteredBranches {
     final query = branchSearchController.text.trim().toLowerCase();
@@ -4743,6 +5077,21 @@ Widget tinyActionButton(String label) => ElevatedButton(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
       onPressed: () {},
       child: Text(label),
+    );
+
+Widget compactTableButton({
+  required String label,
+  required VoidCallback onPressed,
+}) =>
+    OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 38),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+      ),
+      onPressed: onPressed,
+      child: Text(label, overflow: TextOverflow.ellipsis),
     );
 
 DataColumn dataLabel(String label) => DataColumn(
