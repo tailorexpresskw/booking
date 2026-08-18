@@ -12,6 +12,7 @@ const maroon = Color(0xFF6E1D32);
 const gold = Color(0xFFC7A04B);
 const ink = Color(0xFF21171A);
 const sand = Color(0xFFFAF5EA);
+const blush = Color(0xFFFFEEF0);
 
 enum Role {
   admin,
@@ -719,10 +720,28 @@ class AppState extends ChangeNotifier {
   final List<StaffUser> staffUsers = [];
   final List<DeliveryAreaPrice> areaPrices = [];
   Timer? _poller;
+  String notificationPermission = html.Notification.permission ?? 'default';
+  int staffNotificationCount = 0;
+  String staffNotificationText = '';
 
   String t(String en, String ar) => isArabic ? ar : en;
   TextDirection get dir => isArabic ? TextDirection.rtl : TextDirection.ltr;
   bool get signedIn => role != null;
+  bool get browserNotificationsEnabled => notificationPermission == 'granted';
+
+  Future<void> enableBrowserNotifications() async {
+    try {
+      notificationPermission = await html.Notification.requestPermission();
+      if (browserNotificationsEnabled) {
+        html.Notification('Tailor Express',
+            body: t('Notifications are enabled.',
+                'تم تفعيل التنبيهات.'));
+      }
+    } catch (_) {
+      notificationPermission = 'unsupported';
+    }
+    notifyListeners();
+  }
 
   void toggleLang() {
     isArabic = !isArabic;
@@ -1150,13 +1169,72 @@ class AppState extends ChangeNotifier {
       );
       final remote = _decodeOrders(response.responseText);
       if (remote == null || _sameOrders(remote)) return;
+      final previous = List<Order>.from(orders);
       orders
         ..clear()
         ..addAll(remote);
       _saveOrders();
+      _notifyStaffChanges(previous, remote, quiet: quiet);
       notifyListeners();
     } catch (_) {
       if (!quiet) notifyListeners();
+    }
+  }
+
+  void _notifyStaffChanges(
+    List<Order> previous,
+    List<Order> next, {
+    required bool quiet,
+  }) {
+    if (!quiet || !signedIn) return;
+    final previousById = {for (final order in previous) order.id: order};
+    final messages = <String>[];
+    final staffName = currentStaffName.toLowerCase();
+
+    for (final order in next) {
+      final old = previousById[order.id];
+      if (old == null) {
+        if (role == Role.admin ||
+            role == Role.employee ||
+            role == Role.receptionistSupervisor) {
+          messages.add(t('New booking ${order.id} needs branch assignment.',
+              'حجز جديد ${order.id} يحتاج تعيين الفرع.'));
+        }
+        continue;
+      }
+
+      if (!old.hasBranch &&
+          order.hasBranch &&
+          !order.hasDriver &&
+          (role == Role.admin || role == Role.driverSupervisor)) {
+        messages.add(t('${order.id} is ready for driver assignment.',
+            '${order.id} جاهز لتعيين السائق.'));
+      }
+      if (old.receptionist.toLowerCase() != order.receptionist.toLowerCase() &&
+          order.receptionist.toLowerCase() == staffName &&
+          role == Role.receptionist) {
+        messages.add(t('${order.id} was assigned to you.',
+            'تم تعيين ${order.id} لك.'));
+      }
+      if (old.driver.toLowerCase() != order.driver.toLowerCase() &&
+          order.driver.toLowerCase() == staffName &&
+          role == Role.driver) {
+        messages.add(t('${order.id} was assigned for delivery.',
+            'تم تعيين ${order.id} للتوصيل.'));
+      }
+      if (old.tailor.toLowerCase() != order.tailor.toLowerCase() &&
+          order.tailor.toLowerCase() == staffName &&
+          role == Role.tailor) {
+        messages.add(t('${order.id} was assigned for tailoring.',
+            'تم تعيين ${order.id} للخياطة.'));
+      }
+    }
+
+    if (messages.isEmpty) return;
+    staffNotificationCount += messages.length;
+    staffNotificationText = messages.first;
+    if (browserNotificationsEnabled) {
+      html.Notification('Tailor Express', body: staffNotificationText);
     }
   }
 
@@ -1387,20 +1465,77 @@ class TailorWebApp extends StatelessWidget {
           title: 'Tailor Express Home Service',
           theme: ThemeData(
             useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(seedColor: maroon),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: maroon,
+              primary: maroon,
+              secondary: gold,
+              surface: const Color(0xFFFFFBF6),
+            ),
             scaffoldBackgroundColor: sand,
+            fontFamily: 'Arial',
+            cardTheme: CardThemeData(
+              color: const Color(0xFFFFFBF6),
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+                side: const BorderSide(color: Color(0xFFE9D9BF)),
+              ),
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: maroon,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(48, 48),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999)),
+                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: maroon,
+                minimumSize: const Size(48, 48),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                side: BorderSide(color: maroon.withOpacity(.65), width: 1.4),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999)),
+                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999)),
+                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            snackBarTheme: const SnackBarThemeData(
+              backgroundColor: maroon,
+              contentTextStyle:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+              behavior: SnackBarBehavior.floating,
+            ),
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
               fillColor: Colors.white,
               border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none),
               enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(18),
                   borderSide: const BorderSide(color: Color(0xFFE2D6BC))),
               focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: maroon)),
+                  borderRadius: BorderRadius.circular(18),
+                  borderSide: const BorderSide(color: maroon, width: 1.8)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
             ),
           ),
           builder: (context, child) => Directionality(
@@ -1466,10 +1601,12 @@ class Shell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final compact = width < 640;
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.all(compact ? 14 : 24),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1240),
@@ -1481,7 +1618,7 @@ class Shell extends StatelessWidget {
                         spacing: 12,
                         runSpacing: 12,
                         children: [
-                          brand(),
+                          brand(compact: compact),
                           Wrap(spacing: 10, runSpacing: 10, children: [
                             if (public)
                               nav(
@@ -1495,6 +1632,8 @@ class Shell extends StatelessWidget {
                               Chip(
                                   label: Text(
                                       '${roleLabel(role!, state.isArabic)} • ${state.user}')),
+                            if (role != null && state.signedIn)
+                              notificationButton(context, state),
                             OutlinedButton(
                                 onPressed: state.toggleLang,
                                 child: Text(state.isArabic ? 'EN' : 'AR')),
@@ -1513,26 +1652,22 @@ class Shell extends StatelessWidget {
                         ]),
                     const SizedBox(height: 20),
                     Container(
-                      padding: const EdgeInsets.all(28),
+                      width: double.infinity,
+                      padding: EdgeInsets.all(compact ? 22 : 28),
                       decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(28),
                           gradient: const LinearGradient(
-                              colors: [Color(0xFF15110D), Color(0xFF302518)])),
+                              colors: [maroon, Color(0xFF2B0D16)])),
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('TAILOR EXPRESS',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 26,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 2)),
+                            brand(light: true, large: true),
                             if (title.trim().isNotEmpty) ...[
                               const SizedBox(height: 12),
                               Text(title,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       color: Colors.white,
-                                      fontSize: 34,
+                                      fontSize: compact ? 28 : 34,
                                       fontWeight: FontWeight.w700,
                                       height: 1.05)),
                             ],
@@ -1555,25 +1690,91 @@ class Shell extends StatelessWidget {
   }
 }
 
-Widget brand() => Row(mainAxisSize: MainAxisSize.min, children: [
-      Container(
-        width: 34,
-        height: 34,
-        decoration: const BoxDecoration(color: maroon, shape: BoxShape.circle),
-        child: const Center(
-          child: Text('X',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w300,
-                  height: 1)),
-        ),
+Widget brand({
+  bool light = false,
+  bool large = false,
+  bool compact = false,
+}) {
+  final markSize = large ? 46.0 : 34.0;
+  final textStyle = TextStyle(
+    color: light ? Colors.white : maroon,
+    fontWeight: FontWeight.w700,
+    fontSize: large ? 26 : (compact ? 17 : 19),
+    letterSpacing: large ? 1.3 : .4,
+  );
+  return Row(mainAxisSize: MainAxisSize.min, children: [
+    TailorMark(size: markSize, light: light),
+    SizedBox(width: large ? 14 : 12),
+    Text('Tailor Express'.toUpperCase(), style: textStyle),
+  ]);
+}
+
+class TailorMark extends StatelessWidget {
+  const TailorMark({super.key, required this.size, this.light = false});
+  final double size;
+  final bool light;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: light ? Colors.white : maroon,
+        shape: BoxShape.circle,
       ),
-      const SizedBox(width: 12),
-      const Text('Tailor Express',
-          style: TextStyle(
-              color: maroon, fontWeight: FontWeight.w700, fontSize: 19)),
-    ]);
+      child: CustomPaint(
+        painter: TailorMarkPainter(color: light ? maroon : Colors.white),
+      ),
+    );
+  }
+}
+
+class TailorMarkPainter extends CustomPainter {
+  const TailorMarkPainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = size.width * .095
+      ..strokeCap = StrokeCap.round;
+    final inset = size.width * .28;
+    canvas.drawLine(Offset(inset, inset), Offset(size.width - inset,
+        size.height - inset), paint);
+    canvas.drawLine(Offset(size.width - inset, inset), Offset(inset,
+        size.height - inset), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant TailorMarkPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+Widget notificationButton(BuildContext context, AppState state) {
+  final enabled = state.browserNotificationsEnabled;
+  final count = state.staffNotificationCount;
+  final label = enabled
+      ? (count > 0
+          ? state.t('Notifications $count', 'تنبيهات $count')
+          : state.t('Notifications on', 'التنبيهات مفعلة'))
+      : state.t('Enable notifications', 'تفعيل التنبيهات');
+  return OutlinedButton.icon(
+    onPressed: () async {
+      if (!enabled) {
+        await state.enableBrowserNotifications();
+      }
+      if (state.staffNotificationText.isNotEmpty && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(state.staffNotificationText)),
+        );
+      }
+    },
+    icon: Icon(enabled ? Icons.notifications_active : Icons.notifications_none),
+    label: Text(label),
+  );
+}
 
 Widget nav(BuildContext context, String label, String path) {
   final current =
@@ -2834,9 +3035,9 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     );
   }
 
-  Widget rowActions(BuildContext context, Order order) {
+  Widget rowActions(BuildContext context, Order order, {double width = 430}) {
     return SizedBox(
-      width: 430,
+      width: width,
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -2869,9 +3070,68 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     );
   }
 
+  Widget detailLine(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(color: ink, fontSize: 15, height: 1.35),
+          children: [
+            TextSpan(
+              text: '$label: ',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            TextSpan(text: value),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget mobileOrderCard(BuildContext context, Order order) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(order.id,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800, color: maroon)),
+              badge(stageLabel(order.stage, state.isArabic),
+                  stageColor(order.stage)),
+              badge(
+                  order.paymentStatus.toLowerCase() == 'paid'
+                      ? state.t('Paid', 'مدفوع')
+                      : state.t('Pending', 'معلق'),
+                  order.paymentStatus.toLowerCase() == 'paid'
+                      ? const Color(0xFF2D8A57)
+                      : gold),
+            ],
+          ),
+          const SizedBox(height: 12),
+          detailLine(state.t('Visit', 'الزيارة'), order.window),
+          detailLine(state.t('Customer', 'العميل'), order.customer),
+          detailLine(state.t('Mobile', 'الهاتف'), order.mobile),
+          detailLine(state.t('Area', 'المنطقة'), order.area(state.isArabic)),
+          detailLine(state.t('Branch', 'الفرع'), order.branch),
+          detailLine(state.t('Receptionist', 'الاستقبال'), order.receptionist),
+          detailLine(state.t('Driver', 'السائق'), order.driver),
+          detailLine(state.t('Service', 'الخدمة'), order.service),
+          const SizedBox(height: 10),
+          rowActions(context, order, width: double.infinity),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final shown = filteredOrders;
+    final compact = MediaQuery.of(context).size.width < 760;
     final stageFilters = [
       null,
       Stage.newBooking,
@@ -2943,55 +3203,64 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           style: const TextStyle(color: Color(0xFF756A5C)),
         ),
         const SizedBox(height: 14),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            dataRowMinHeight: 92,
-            dataRowMaxHeight: 132,
-            headingRowHeight: 58,
-            columnSpacing: 28,
-            columns: [
-              dataLabel('ID'),
-              dataLabel(state.t('Actions', 'الإجراءات')),
-              dataLabel(state.t('Visit Date & Time', 'موعد الزيارة')),
-              dataLabel(state.t('Customer', 'العميل')),
-              dataLabel(state.t('Mobile', 'الهاتف')),
-              dataLabel(state.t('Area', 'المنطقة')),
-              dataLabel(state.t('Branch', 'الفرع')),
-              dataLabel(state.t('Services', 'الخدمات')),
-              dataLabel(state.t('Receptionist', 'الاستقبال')),
-              dataLabel(state.t('Driver', 'السائق')),
-              dataLabel(state.t('Status', 'الحالة')),
-              dataLabel(state.t('Payment', 'الدفع')),
-              dataLabel(state.t('Action', 'الإجراء')),
+        if (compact)
+          Column(
+            children: [
+              for (final order in shown.take(80)) ...[
+                mobileOrderCard(context, order),
+                const SizedBox(height: 12),
+              ],
             ],
-            rows: [
-              for (final order in shown.take(120))
-                DataRow(cells: [
-                  textCell(order.id, width: 96, maxLines: 1),
-                  DataCell(rowActions(context, order)),
-                  textCell(order.window, width: 220),
-                  textCell(order.customer, width: 170),
-                  textCell(order.mobile, width: 120, maxLines: 1),
-                  textCell(order.area(state.isArabic), width: 190),
-                  textCell(order.branch, width: 210),
-                  textCell(order.service, width: 160),
-                  textCell(order.receptionist, width: 190),
-                  textCell(order.driver, width: 150),
-                  DataCell(badge(
-                      stageLabel(order.stage, state.isArabic),
-                      stageColor(order.stage))),
-                  DataCell(badge(
-                      order.paymentStatus.toLowerCase() == 'paid'
-                          ? state.t('Paid', 'مدفوع')
-                          : state.t('Pending', 'معلق'),
-                      order.paymentStatus.toLowerCase() == 'paid'
-                          ? const Color(0xFF2D8A57)
-                          : gold)),
-                ]),
-            ],
+          )
+        else
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              dataRowMinHeight: 92,
+              dataRowMaxHeight: 132,
+              headingRowHeight: 58,
+              columnSpacing: 28,
+              columns: [
+                dataLabel('ID'),
+                dataLabel(state.t('Actions', 'الإجراءات')),
+                dataLabel(state.t('Visit Date & Time', 'موعد الزيارة')),
+                dataLabel(state.t('Customer', 'العميل')),
+                dataLabel(state.t('Mobile', 'الهاتف')),
+                dataLabel(state.t('Area', 'المنطقة')),
+                dataLabel(state.t('Branch', 'الفرع')),
+                dataLabel(state.t('Services', 'الخدمات')),
+                dataLabel(state.t('Receptionist', 'الاستقبال')),
+                dataLabel(state.t('Driver', 'السائق')),
+                dataLabel(state.t('Status', 'الحالة')),
+                dataLabel(state.t('Payment', 'الدفع')),
+              ],
+              rows: [
+                for (final order in shown.take(120))
+                  DataRow(cells: [
+                    textCell(order.id, width: 96, maxLines: 1),
+                    DataCell(rowActions(context, order)),
+                    textCell(order.window, width: 220),
+                    textCell(order.customer, width: 170),
+                    textCell(order.mobile, width: 120, maxLines: 1),
+                    textCell(order.area(state.isArabic), width: 190),
+                    textCell(order.branch, width: 210),
+                    textCell(order.service, width: 160),
+                    textCell(order.receptionist, width: 190),
+                    textCell(order.driver, width: 150),
+                    DataCell(badge(
+                        stageLabel(order.stage, state.isArabic),
+                        stageColor(order.stage))),
+                    DataCell(badge(
+                        order.paymentStatus.toLowerCase() == 'paid'
+                            ? state.t('Paid', 'مدفوع')
+                            : state.t('Pending', 'معلق'),
+                        order.paymentStatus.toLowerCase() == 'paid'
+                            ? const Color(0xFF2D8A57)
+                            : gold)),
+                  ]),
+              ],
+            ),
           ),
-        ),
         if (shown.length > 120) ...[
           const SizedBox(height: 10),
           Text(state.t('Showing first 120 matching orders.',
@@ -5269,10 +5538,10 @@ Widget compactTableButton({
 }) =>
     OutlinedButton(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(0, 38),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        minimumSize: const Size(0, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
+        visualDensity: VisualDensity.standard,
       ),
       onPressed: onPressed,
       child: Text(label, overflow: TextOverflow.ellipsis),
