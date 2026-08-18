@@ -8,9 +8,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 void main() => runApp(TailorWebApp(state: AppState()));
 
+const maroon = Color(0xFF6E1D32);
 const gold = Color(0xFFC7A04B);
-const ink = Color(0xFF17130E);
-const sand = Color(0xFFF7F1E5);
+const ink = Color(0xFF21171A);
+const sand = Color(0xFFFAF5EA);
 
 enum Role {
   admin,
@@ -24,6 +25,9 @@ enum Role {
 
 enum Stage {
   newBooking,
+  completed,
+  onShop,
+  outForDelivery,
   branchAssigned,
   assigned,
   onWay,
@@ -55,31 +59,70 @@ String roleLabel(Role role, bool ar) => switch (role) {
     };
 
 String stageLabel(Stage stage, bool ar) => switch (stage) {
-      Stage.newBooking => ar ? 'جديد' : 'New',
-      Stage.branchAssigned => ar ? 'تم تعيين الفرع' : 'Branch assigned',
-      Stage.assigned => ar ? 'تم تعيين السائق' : 'Driver assigned',
-      Stage.onWay => ar ? 'تم الإرسال' : 'Dispatched',
-      Stage.tailoring => ar ? 'قيد الخياطة' : 'In tailoring',
+      Stage.newBooking => ar ? 'طلب جديد' : 'New Order',
+      Stage.completed || Stage.branchAssigned => ar ? 'مكتمل' : 'Completed',
+      Stage.onShop || Stage.tailoring => ar ? 'في المحل' : 'On Shop',
       Stage.ready => ar ? 'جاهز' : 'Ready',
+      Stage.outForDelivery ||
+      Stage.assigned ||
+      Stage.onWay =>
+        ar ? 'خارج للتوصيل' : 'Out for Delivery',
       Stage.delivered => ar ? 'تم التسليم' : 'Delivered',
     };
 
 Stage stageFromKey(String value) {
+  final normalized = value.trim();
+  if (normalized == 'branchAssigned') return Stage.completed;
+  if (normalized == 'tailoring') return Stage.onShop;
+  if (normalized == 'assigned' || normalized == 'onWay') {
+    return Stage.outForDelivery;
+  }
   for (final stage in Stage.values) {
-    if (stage.name == value) return stage;
+    if (stage.name == normalized) return stage;
   }
   return Stage.newBooking;
 }
 
 Color stageColor(Stage stage) => switch (stage) {
-      Stage.newBooking => const Color(0xFF977527),
-      Stage.branchAssigned => const Color(0xFF8A6E2F),
-      Stage.assigned => const Color(0xFF2D8AB1),
-      Stage.onWay => const Color(0xFF2A63B5),
-      Stage.tailoring => const Color(0xFF6D58A5),
+      Stage.newBooking => gold,
+      Stage.completed || Stage.branchAssigned => const Color(0xFF7A5B2F),
+      Stage.onShop || Stage.tailoring => maroon,
       Stage.ready => const Color(0xFF3A9962),
+      Stage.outForDelivery ||
+      Stage.assigned ||
+      Stage.onWay =>
+        const Color(0xFF2A63B5),
       Stage.delivered => const Color(0xFF2D8A57),
     };
+
+int stageRank(Stage stage) => switch (stage) {
+      Stage.newBooking => 0,
+      Stage.completed || Stage.branchAssigned => 1,
+      Stage.onShop || Stage.tailoring => 2,
+      Stage.ready => 3,
+      Stage.outForDelivery || Stage.assigned || Stage.onWay => 4,
+      Stage.delivered => 5,
+    };
+
+String customerStageLabel(Stage stage, bool ar) => switch (stage) {
+      Stage.newBooking => ar ? 'تم استلام الطلب' : 'Order received',
+      Stage.completed ||
+      Stage.branchAssigned ||
+      Stage.onShop ||
+      Stage.tailoring =>
+        ar ? 'جاري العمل عليه' : 'Working on it',
+      Stage.ready => ar ? 'جاهز' : 'Ready',
+      Stage.outForDelivery ||
+      Stage.assigned ||
+      Stage.onWay =>
+        ar ? 'خارج للتوصيل' : 'Out for Delivery',
+      Stage.delivered => ar ? 'تم التسليم' : 'Delivered',
+    };
+
+bool isReadyForDriverAssignment(Order order) =>
+    order.stage == Stage.ready && order.hasBranch && !order.hasDriver;
+
+bool isDelivered(Order order) => order.stage == Stage.delivered;
 
 class Area {
   const Area(this.en, this.ar);
@@ -259,21 +302,30 @@ class StaffUser {
     required this.password,
     required this.displayName,
     required this.role,
+    this.branch = '',
     this.active = true,
+    this.availableToday = true,
+    this.homeServiceToday = true,
   });
 
   final String username;
   final String password;
   final String displayName;
   final Role role;
+  final String branch;
   final bool active;
+  final bool availableToday;
+  final bool homeServiceToday;
 
   Map<String, dynamic> toJson() => {
         'username': username,
         'password': password,
         'displayName': displayName,
         'role': role.name,
+        'branch': branch,
         'active': active,
+        'availableToday': availableToday,
+        'homeServiceToday': homeServiceToday,
       };
 
   factory StaffUser.fromJson(Map<String, dynamic> json) => StaffUser(
@@ -281,7 +333,30 @@ class StaffUser {
         password: json['password'] as String? ?? '',
         displayName: json['displayName'] as String? ?? '',
         role: roleFromSlug(json['role'] as String? ?? '') ?? Role.employee,
+        branch: json['branch'] as String? ?? '',
         active: json['active'] as bool? ?? true,
+        availableToday: json['availableToday'] as bool? ?? true,
+        homeServiceToday: json['homeServiceToday'] as bool? ?? true,
+      );
+
+  StaffUser copyWith({
+    String? password,
+    String? displayName,
+    Role? role,
+    String? branch,
+    bool? active,
+    bool? availableToday,
+    bool? homeServiceToday,
+  }) =>
+      StaffUser(
+        username: username,
+        password: password ?? this.password,
+        displayName: displayName ?? this.displayName,
+        role: role ?? this.role,
+        branch: branch ?? this.branch,
+        active: active ?? this.active,
+        availableToday: availableToday ?? this.availableToday,
+        homeServiceToday: homeServiceToday ?? this.homeServiceToday,
       );
 }
 
@@ -335,7 +410,8 @@ const defaultStaffUsers = <StaffUser>[
       username: 'reception',
       password: 'Reception123!',
       displayName: 'Aisha',
-      role: Role.receptionist),
+      role: Role.receptionist,
+      branch: 'Yarmouk'),
   StaffUser(
       username: 'afroz',
       password: 'Tailor123!',
@@ -355,7 +431,8 @@ const defaultStaffUsers = <StaffUser>[
       username: 'fatima',
       password: 'Reception123!',
       displayName: 'Fatima',
-      role: Role.receptionist),
+      role: Role.receptionist,
+      branch: 'Hessa AlMubarak District'),
 ];
 
 bool isPendingAssignment(String value) {
@@ -533,19 +610,19 @@ const seedOrders = <Order>[
     areaEn: 'North West Sulaibikhat',
     areaAr: 'شمال غرب الصليبيخات',
     address: 'North West Sulaibikhat, Block 4, Street 18, House 12',
-    service: 'Alterations',
+    service: 'Urgent repair',
     preference: 'Women tailor',
     window: '29-07-2026, 7:30 PM - 8:00 PM',
     driver: 'Omar',
     tailor: 'AFROZ',
-    stage: Stage.onWay,
+    stage: Stage.outForDelivery,
     lat: 29.3606,
     lng: 47.9275,
     notes: 'Evening pickup and quick size check.',
     timeline: [
       '28-07-2026 08:12 PM • Booking approved',
       '29-07-2026 10:10 AM • Tailor assigned',
-      '29-07-2026 06:58 PM • Driver dispatched'
+      '29-07-2026 06:58 PM • Out for delivery'
     ],
   ),
   Order(
@@ -555,7 +632,7 @@ const seedOrders = <Order>[
     areaEn: 'Shaab',
     areaAr: 'الشعب',
     address: 'Shaab, Block 1, Street 10, Villa 6',
-    service: 'Occasion fitting',
+    service: 'Tailoring',
     preference: 'Women tailor',
     window: '29-07-2026, 5:00 PM - 5:30 PM',
     driver: 'Omar',
@@ -599,12 +676,12 @@ const seedOrders = <Order>[
     areaEn: 'West Abdullah Mubarak',
     areaAr: 'غرب عبدالله المبارك',
     address: 'West Abdullah Mubarak, Block 5, Street 512, House 230',
-    service: 'Alterations',
+    service: 'Repair',
     preference: 'No preference',
     window: '30-07-2026, 6:00 PM - 7:00 PM',
     driver: 'Pending assignment',
     tailor: 'AFROZ',
-    stage: Stage.assigned,
+    stage: Stage.outForDelivery,
     lat: 29.2857,
     lng: 47.8890,
     notes: 'Customer prefers a call before arrival.',
@@ -796,9 +873,67 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  List<String> staffNamesForRole(Role target) {
+  Future<bool> updateStaffUser(StaffUser next) async {
+    final normalized = next.username.trim().toLowerCase();
+    final index =
+        staffUsers.indexWhere((user) => user.username.toLowerCase() == normalized);
+    if (index == -1 || next.displayName.trim().isEmpty) return false;
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/staff-users/${Uri.encodeComponent(next.username)}'),
+        method: 'PATCH',
+        sendData: jsonEncode(next.toJson()),
+        requestHeaders: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      final status = response.status ?? 0;
+      if (status < 200 || status >= 300) return false;
+      if (response.responseText != null && response.responseText!.isNotEmpty) {
+        staffUsers[index] = StaffUser.fromJson(Map<String, dynamic>.from(
+            jsonDecode(response.responseText!) as Map));
+      } else {
+        staffUsers[index] = next;
+      }
+    } catch (_) {
+      staffUsers[index] = next;
+    }
+    if (currentStaff?.username.toLowerCase() == normalized) {
+      currentStaff = staffUsers[index];
+      role = currentStaff!.role;
+      user = currentStaff!.displayName;
+    }
+    _saveStaffUsers();
+    notifyListeners();
+    return true;
+  }
+
+  List<StaffUser> staffForRole(Role target,
+      {String? branch, bool availableOnly = false}) {
+    final branchFilter = branch?.trim().toLowerCase() ?? '';
+    final people = staffUsers.where((item) {
+      if (!item.active || item.role != target) return false;
+      if (availableOnly && (!item.availableToday || !item.homeServiceToday)) {
+        return false;
+      }
+      if (branchFilter.isNotEmpty &&
+          item.branch.trim().isNotEmpty &&
+          item.branch.trim().toLowerCase() != branchFilter) {
+        return false;
+      }
+      return true;
+    }).toList()
+      ..sort((a, b) => a.displayName.compareTo(b.displayName));
+    return people;
+  }
+
+  List<String> staffNamesForRole(Role target,
+      {String? branch, bool availableOnly = false}) {
     final names = staffUsers
-        .where((item) => item.active && item.role == target)
+        .where((item) => staffForRole(target,
+                branch: branch, availableOnly: availableOnly)
+            .contains(item))
         .map((item) => item.displayName)
         .where((name) => name.trim().isNotEmpty)
         .toSet()
@@ -1246,7 +1381,7 @@ class TailorWebApp extends StatelessWidget {
           title: 'Tailor Express Home Service',
           theme: ThemeData(
             useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(seedColor: gold),
+            colorScheme: ColorScheme.fromSeed(seedColor: maroon),
             scaffoldBackgroundColor: sand,
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
@@ -1259,7 +1394,7 @@ class TailorWebApp extends StatelessWidget {
                   borderSide: const BorderSide(color: Color(0xFFE2D6BC))),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: gold)),
+                  borderSide: const BorderSide(color: maroon)),
             ),
           ),
           builder: (context, child) => Directionality(
@@ -1414,12 +1549,24 @@ class Shell extends StatelessWidget {
   }
 }
 
-Widget brand() => const Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.content_cut, color: gold),
-      SizedBox(width: 10),
-      Text('TAILOR EXPRESS',
+Widget brand() => Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+        width: 34,
+        height: 34,
+        decoration: const BoxDecoration(color: maroon, shape: BoxShape.circle),
+        child: const Center(
+          child: Text('X',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w300,
+                  height: 1)),
+        ),
+      ),
+      const SizedBox(width: 12),
+      const Text('Tailor Express',
           style: TextStyle(
-              color: ink, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
+              color: maroon, fontWeight: FontWeight.w700, fontSize: 19)),
     ]);
 
 Widget nav(BuildContext context, String label, String path) {
@@ -2123,8 +2270,8 @@ class _TrackPageState extends State<TrackPage> {
         padding: const EdgeInsets.all(22),
         child: order == null
             ? Text(s.t(
-                'Search an order to show status, map links and assigned team.',
-                'ابحث عن طلب لإظهار الحالة وروابط الخريطة والفريق المخصص.'))
+                'Search an order to show its status.',
+                'ابحث عن طلب لإظهار حالته.'))
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2135,46 +2282,27 @@ class _TrackPageState extends State<TrackPage> {
                     children: [
                       Text('${s.t('Order', 'الطلب')} ${order!.id}',
                           style: Theme.of(context).textTheme.headlineSmall),
-                      badge(stageLabel(order!.stage, s.isArabic),
+                      badge(customerStageLabel(order!.stage, s.isArabic),
                           stageColor(order!.stage)),
+                      badge(
+                        order!.paymentStatus.toLowerCase() == 'paid'
+                            ? s.t('Paid', 'مدفوع')
+                            : s.t('Payment pending', 'الدفع معلق'),
+                        order!.paymentStatus.toLowerCase() == 'paid'
+                            ? const Color(0xFF2D8A57)
+                            : gold,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text('${order!.customer} • ${order!.mobile}'),
-                  const SizedBox(height: 10),
-                  bullet(
-                      '${s.t('Area', 'المنطقة')}: ${order!.area(s.isArabic)}'),
-                  bullet('${s.t('Address', 'العنوان')}: ${order!.address}'),
-                  bullet('${s.t('Service', 'الخدمة')}: ${order!.service}'),
-                  bullet('${s.t('Tailor', 'الخياط')}: ${order!.tailor}'),
-                  bullet('${s.t('Driver', 'السائق')}: ${order!.driver}'),
-                  bullet(
-                      '${s.t('Visit window', 'موعد الزيارة')}: ${order!.window}'),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      ElevatedButton(
-                          onPressed: () => openMap(order!, true),
-                          child: const Text('Google Maps')),
-                      OutlinedButton(
-                          onPressed: () => openMap(order!, false),
-                          child: const Text('OpenStreetMap')),
-                      OutlinedButton(
-                          onPressed: () => copy(
-                              buildTrackingLink(order!.id),
-                              s.t('Tracking link copied.',
-                                  'تم نسخ رابط التتبع.')),
-                          child: Text(
-                              s.t('Copy tracking link', 'نسخ رابط التتبع'))),
-                    ],
-                  ),
+                  bullet('${s.t('Current status', 'الحالة الحالية')}: ${customerStageLabel(order!.stage, s.isArabic)}'),
+                  bullet('${s.t('Payment', 'الدفع')}: ${order!.paymentStatus.toLowerCase() == 'paid' ? s.t('Paid', 'مدفوع') : s.t('Pending', 'معلق')}'),
                   const SizedBox(height: 18),
-                  Text(s.t('Timeline', 'خط سير الطلب'),
+                  Text(s.t('Order progress', 'تقدم الطلب'),
                       style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 10),
-                  for (final step in order!.timeline) bullet(step),
+                  for (final step in customerProgressSteps(order!, s.isArabic))
+                    bullet(step),
                 ],
               ),
       ),
@@ -2369,7 +2497,7 @@ class DashboardPage extends StatelessWidget {
     }
 
     final active =
-        state.orders.where((o) => o.stage != Stage.delivered).toList();
+        state.orders.where((o) => !isDelivered(o)).toList();
     final staffName = state.currentStaffName.toLowerCase();
     final mine = switch (role) {
       Role.driver => active
@@ -2399,6 +2527,13 @@ class DashboardPage extends StatelessWidget {
         ]),
         const SizedBox(height: 18),
         if (role == Role.employee)
+          OrdersDashboardTable(
+            state: state,
+            orders: state.orders,
+            title: state.t('Customer service orders', 'طلبات خدمة العملاء'),
+          ),
+        if (role == Role.employee) const SizedBox(height: 18),
+        if (role == Role.employee)
           Card(
               child: Padding(
                   padding: const EdgeInsets.all(22),
@@ -2417,6 +2552,13 @@ class DashboardPage extends StatelessWidget {
                                   stageLabel(o.stage, state.isArabic),
                                   stageColor(o.stage))),
                       ]))),
+        if (role == Role.tailor)
+          OrdersDashboardTable(
+            state: state,
+            orders: mine,
+            title: state.t('Assigned tailoring work', 'أعمال الخياطة المسندة'),
+          ),
+        if (role == Role.tailor) const SizedBox(height: 18),
         if (role == Role.tailor)
           Card(
               child: Padding(
@@ -2439,10 +2581,265 @@ class DashboardPage extends StatelessWidget {
                                   stageColor(o.stage))),
                       ]))),
         if (role == Role.driver)
+          OrdersDashboardTable(
+            state: state,
+            orders: mine,
+            title: state.t('My delivery orders', 'طلبات التوصيل الخاصة بي'),
+          ),
+        if (role == Role.driver) const SizedBox(height: 18),
+        if (role == Role.driver)
           DriverOperationsPanel(state: state, orders: mine),
       ]),
     );
   }
+}
+
+List<String> customerProgressSteps(Order order, bool ar) {
+  final rank = stageRank(order.stage);
+  final steps = <String>[
+    ar ? 'تم استلام الطلب' : 'Order received',
+    ar ? 'جاري العمل عليه' : 'Working on it',
+    ar ? 'جاهز' : 'Ready',
+    ar ? 'خارج للتوصيل' : 'Out for Delivery',
+    ar ? 'تم التسليم' : 'Delivered',
+  ];
+  final visible = rank <= 0 ? 1 : rank + 1;
+  return steps.take(visible.clamp(1, steps.length).toInt()).toList();
+}
+
+class OrdersDashboardTable extends StatefulWidget {
+  const OrdersDashboardTable({
+    super.key,
+    required this.state,
+    required this.orders,
+    this.title,
+  });
+
+  final AppState state;
+  final List<Order> orders;
+  final String? title;
+
+  @override
+  State<OrdersDashboardTable> createState() => _OrdersDashboardTableState();
+}
+
+class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
+  final search = TextEditingController();
+  Stage? selectedStage;
+  String selectedBranch = 'All';
+
+  AppState get state => widget.state;
+
+  @override
+  void initState() {
+    super.initState();
+    search.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  List<Order> get filteredOrders {
+    final query = search.text.trim().toLowerCase();
+    final branch = selectedBranch.toLowerCase();
+    final orders = widget.orders.where((order) {
+      if (selectedStage != null &&
+          stageRank(order.stage) != stageRank(selectedStage!)) {
+        return false;
+      }
+      if (selectedBranch != 'All' && order.branch.toLowerCase() != branch) {
+        return false;
+      }
+      if (query.isEmpty) return true;
+      return [
+        order.id,
+        order.customer,
+        order.mobile,
+        order.areaEn,
+        order.areaAr,
+        order.service,
+        order.branch,
+        order.receptionist,
+        order.driver,
+      ].any((value) => value.toLowerCase().contains(query));
+    }).toList();
+    orders.sort((a, b) {
+      final dateCompare = visitSortDate(a).compareTo(visitSortDate(b));
+      if (dateCompare != 0) return dateCompare;
+      return stageRank(a.stage).compareTo(stageRank(b.stage));
+    });
+    return orders;
+  }
+
+  List<String> get branchOptions {
+    final branches = widget.orders
+        .map((order) => order.branch.trim())
+        .where((branch) => branch.isNotEmpty && !isPendingAssignment(branch))
+        .toSet()
+        .toList()
+      ..sort();
+    return ['All', ...branches];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = filteredOrders;
+    final stageFilters = [
+      null,
+      Stage.newBooking,
+      Stage.completed,
+      Stage.onShop,
+      Stage.ready,
+      Stage.outForDelivery,
+      Stage.delivered,
+    ];
+    return adminCard(
+      context,
+      title: widget.title ?? state.t('Orders', 'الطلبات'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final stage in stageFilters)
+              ChoiceChip(
+                label: Text(stage == null
+                    ? '${state.t('All', 'الكل')} ${widget.orders.length}'
+                    : '${stageLabel(stage, state.isArabic)} ${widget.orders.where((o) => stageRank(o.stage) == stageRank(stage)).length}'),
+                selected: selectedStage == stage,
+                onSelected: (_) => setState(() => selectedStage = stage),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(spacing: 12, runSpacing: 12, children: [
+          SizedBox(
+            width: 220,
+            child: DropdownButtonFormField<String>(
+              value: branchOptions.contains(selectedBranch) ? selectedBranch : 'All',
+              decoration:
+                  InputDecoration(labelText: state.t('Branch', 'الفرع')),
+              items: [
+                for (final branch in branchOptions)
+                  DropdownMenuItem(value: branch, child: Text(branch)),
+              ],
+              onChanged: (value) =>
+                  setState(() => selectedBranch = value ?? 'All'),
+            ),
+          ),
+          SizedBox(
+            width: 260,
+            child: TextField(
+              controller: search,
+              decoration: InputDecoration(
+                  labelText: state.t('Search', 'بحث'),
+                  suffixIcon: const Icon(Icons.search)),
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: () {
+              setState(() {
+                selectedStage = null;
+                selectedBranch = 'All';
+                search.clear();
+              });
+            },
+            icon: const Icon(Icons.refresh),
+            label: Text(state.t('Reset', 'إعادة ضبط')),
+          ),
+        ]),
+        const SizedBox(height: 14),
+        Text(
+          state.t('Sorted by nearest home-service visit date first.',
+              'مرتبة حسب أقرب موعد زيارة منزلية أولاً.'),
+          style: const TextStyle(color: Color(0xFF756A5C)),
+        ),
+        const SizedBox(height: 14),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: [
+              dataLabel('ID'),
+              dataLabel(state.t('Visit Date & Time', 'موعد الزيارة')),
+              dataLabel(state.t('Customer', 'العميل')),
+              dataLabel(state.t('Mobile', 'الهاتف')),
+              dataLabel(state.t('Area', 'المنطقة')),
+              dataLabel(state.t('Branch', 'الفرع')),
+              dataLabel(state.t('Services', 'الخدمات')),
+              dataLabel(state.t('Receptionist', 'الاستقبال')),
+              dataLabel(state.t('Driver', 'السائق')),
+              dataLabel(state.t('Status', 'الحالة')),
+              dataLabel(state.t('Payment', 'الدفع')),
+              dataLabel(state.t('Action', 'الإجراء')),
+            ],
+            rows: [
+              for (final order in shown.take(120))
+                DataRow(cells: [
+                  DataCell(Text(order.id)),
+                  DataCell(Text(order.window)),
+                  DataCell(Text(order.customer)),
+                  DataCell(Text(order.mobile)),
+                  DataCell(Text(order.area(state.isArabic))),
+                  DataCell(Text(order.branch)),
+                  DataCell(Text(order.service)),
+                  DataCell(Text(order.receptionist)),
+                  DataCell(Text(order.driver)),
+                  DataCell(badge(
+                      stageLabel(order.stage, state.isArabic),
+                      stageColor(order.stage))),
+                  DataCell(badge(
+                      order.paymentStatus.toLowerCase() == 'paid'
+                          ? state.t('Paid', 'مدفوع')
+                          : state.t('Pending', 'معلق'),
+                      order.paymentStatus.toLowerCase() == 'paid'
+                          ? const Color(0xFF2D8A57)
+                          : gold)),
+                  DataCell(OutlinedButton(
+                    onPressed: () => openInvoicePrint(order, state),
+                    child: Text(state.t('Bill', 'فاتورة')),
+                  )),
+                ]),
+            ],
+          ),
+        ),
+        if (shown.length > 120) ...[
+          const SizedBox(height: 10),
+          Text(state.t('Showing first 120 matching orders.',
+              'يتم عرض أول 120 طلب مطابق.')),
+        ],
+      ]),
+    );
+  }
+}
+
+DateTime visitSortDate(Order order) {
+  final text = order.window;
+  final dateMatch = RegExp(r'(\d{1,2})-(\d{1,2})-(\d{4})').firstMatch(text);
+  final timeMatch = RegExp(r'(\d{1,2})(?::(\d{2}))?\s*(AM|PM)',
+          caseSensitive: false)
+      .firstMatch(text);
+  final now = DateTime.now();
+  var day = now.day;
+  var month = now.month;
+  var year = now.year;
+  if (dateMatch != null) {
+    day = int.tryParse(dateMatch.group(1)!) ?? day;
+    month = int.tryParse(dateMatch.group(2)!) ?? month;
+    year = int.tryParse(dateMatch.group(3)!) ?? year;
+  }
+  var hour = 23;
+  var minute = 59;
+  if (timeMatch != null) {
+    hour = int.tryParse(timeMatch.group(1)!) ?? hour;
+    minute = int.tryParse(timeMatch.group(2) ?? '0') ?? 0;
+    final marker = timeMatch.group(3)!.toUpperCase();
+    if (marker == 'PM' && hour < 12) hour += 12;
+    if (marker == 'AM' && hour == 12) hour = 0;
+  }
+  return DateTime(year, month, day, hour, minute);
 }
 
 class BranchAssignmentCard extends StatelessWidget {
@@ -2452,7 +2849,7 @@ class BranchAssignmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pendingBranch = state.orders
-        .where((o) => o.stage != Stage.delivered && !o.hasBranch)
+        .where((o) => !isDelivered(o) && !o.hasBranch)
         .toList();
     return Card(
       child: Padding(
@@ -2484,7 +2881,7 @@ class BranchAssignmentCard extends StatelessWidget {
       order.id,
       branch: assignment.branch,
       receptionist: assignment.receptionist,
-      stage: Stage.branchAssigned,
+      stage: Stage.completed,
       timelineNote: 'Branch assigned to ${assignment.branch}',
     );
     if (context.mounted) {
@@ -2501,7 +2898,7 @@ class DriverAssignmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final driverQueue = state.orders
-        .where((o) => o.stage != Stage.delivered && o.hasBranch && !o.hasDriver)
+        .where(isReadyForDriverAssignment)
         .toList();
     return Card(
       child: Padding(
@@ -2511,8 +2908,8 @@ class DriverAssignmentCard extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           if (driverQueue.isEmpty)
-            Text(state.t('No branch-assigned orders waiting for a driver.',
-                'No branch-assigned orders waiting for a driver.')),
+            Text(state.t('No ready orders waiting for a driver.',
+                'No ready orders waiting for a driver.')),
           for (final order in driverQueue)
             workflowOrderCard(context, state, order, actions: [
               ElevatedButton.icon(
@@ -2532,14 +2929,14 @@ class DriverAssignmentCard extends StatelessWidget {
       state,
       title: state.t('Assign driver', 'Assign driver'),
       label: state.t('Driver', 'Driver'),
-      items: state.staffNamesForRole(Role.driver),
+      items: state.staffNamesForRole(Role.driver, availableOnly: true),
       initialValue: order.hasDriver ? order.driver : null,
     );
     if (driver == null) return;
     await state.updateOrder(
       order.id,
       driver: driver,
-      stage: Stage.assigned,
+      stage: Stage.outForDelivery,
       timelineNote: 'Driver assigned to $driver',
     );
     if (context.mounted) {
@@ -2555,8 +2952,8 @@ class OperationsTrackingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active = state.orders.where((o) => o.stage != Stage.delivered).toList();
-    final history = state.orders.where((o) => o.stage == Stage.delivered).toList();
+    final active = state.orders.where((o) => !isDelivered(o)).toList();
+    final history = state.orders.where(isDelivered).toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Card(
         child: Padding(
@@ -2632,14 +3029,14 @@ class DriverOperationsPanel extends StatelessWidget {
                   label: Text(
                       state.t('Select receptionist', 'اختيار موظف الاستقبال')),
                 ),
-              if (order.stage != Stage.onWay && order.stage != Stage.delivered)
+              if (order.stage != Stage.outForDelivery && !isDelivered(order))
                 ElevatedButton.icon(
-                  onPressed: () => _setStage(context, order, Stage.onWay,
-                      'Driver marked order dispatched'),
+                  onPressed: () => _setStage(context, order, Stage.outForDelivery,
+                      'Driver marked order out for delivery'),
                   icon: const Icon(Icons.route),
-                  label: Text(state.t('Dispatched', 'تم الإرسال')),
+                  label: Text(state.t('Out for Delivery', 'خارج للتوصيل')),
                 ),
-              if (order.stage != Stage.delivered)
+              if (!isDelivered(order))
                 ElevatedButton.icon(
                   onPressed: () => _setStage(context, order, Stage.delivered,
                       'Driver marked order delivered'),
@@ -2667,7 +3064,8 @@ class DriverOperationsPanel extends StatelessWidget {
       state,
       title: state.t('Select receptionist', 'اختيار موظف الاستقبال'),
       label: state.t('Receptionist', 'الاستقبال'),
-      items: state.staffNamesForRole(Role.receptionist),
+      items: state.staffNamesForRole(Role.receptionist,
+          branch: order.hasBranch ? order.branch : null, availableOnly: true),
       initialValue: order.hasReceptionist ? order.receptionist : null,
     );
     if (receptionist == null) return;
@@ -2709,10 +3107,10 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pendingBranch = state.orders
-        .where((o) => o.stage != Stage.delivered && !o.hasBranch)
+        .where((o) => !isDelivered(o) && !o.hasBranch)
         .toList();
     final active =
-        state.orders.where((o) => o.stage != Stage.delivered).toList();
+        state.orders.where((o) => !isDelivered(o)).toList();
     return Shell(
       state: state,
       role: role,
@@ -2729,6 +3127,12 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
               state.t('Active orders', 'الطلبات النشطة'), '${active.length}'),
           metric(state.t('Branches', 'الفروع'), '${adminBranches.length}'),
         ]),
+        const SizedBox(height: 18),
+        OrdersDashboardTable(
+          state: state,
+          orders: state.orders,
+          title: state.t('Supervisor order list', 'قائمة طلبات المشرف'),
+        ),
         const SizedBox(height: 18),
         Card(
           child: Padding(
@@ -2754,6 +3158,8 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         OperationsTrackingPanel(state: state),
+        const SizedBox(height: 18),
+        StaffUsersPanel(state: state),
       ]),
     );
   }
@@ -2766,7 +3172,7 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
       order.id,
       branch: assignment.branch,
       receptionist: assignment.receptionist,
-      stage: Stage.branchAssigned,
+      stage: Stage.completed,
       timelineNote: 'Branch assigned to ${assignment.branch}',
     );
     if (context.mounted) {
@@ -2785,11 +3191,9 @@ class DriverSupervisorDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final driverQueue = state.orders
-        .where((o) => o.stage != Stage.delivered && o.hasBranch && !o.hasDriver)
-        .toList();
+    final driverQueue = state.orders.where(isReadyForDriverAssignment).toList();
     final assigned = state.orders
-        .where((o) => o.stage != Stage.delivered && o.hasDriver)
+        .where((o) => !isDelivered(o) && o.hasDriver)
         .toList();
     return Shell(
       state: state,
@@ -2797,8 +3201,8 @@ class DriverSupervisorDashboard extends StatelessWidget {
       title: state.t('Driver supervisor is notified after branch assignment.',
           'مشرف السائقين يستقبل التنبيه بعد تعيين الفرع.'),
       subtitle: state.t(
-          'Assign the driver and move the order to Driver assigned status.',
-          'عيّن السائق وانقل الطلب إلى حالة تم تعيين السائق.'),
+          'Assign drivers only after an order is Ready, then it moves to Out for Delivery.',
+          'عيّن السائق بعد أن يصبح الطلب جاهزاً، ثم ينتقل إلى خارج للتوصيل.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(state.t('Ready for driver', 'جاهز لتعيين السائق'),
@@ -2806,8 +3210,14 @@ class DriverSupervisorDashboard extends StatelessWidget {
           metric(state.t('Assigned drivers', 'السائقون المعينون'),
               '${assigned.length}'),
           metric(state.t('Active orders', 'الطلبات النشطة'),
-              '${state.orders.where((o) => o.stage != Stage.delivered).length}'),
+              '${state.orders.where((o) => !isDelivered(o)).length}'),
         ]),
+        const SizedBox(height: 18),
+        OrdersDashboardTable(
+          state: state,
+          orders: state.orders,
+          title: state.t('Supervisor order list', 'قائمة طلبات المشرف'),
+        ),
         const SizedBox(height: 18),
         Card(
           child: Padding(
@@ -2818,8 +3228,8 @@ class DriverSupervisorDashboard extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
               if (driverQueue.isEmpty)
-                Text(state.t('No branch-assigned orders waiting for a driver.',
-                    'لا توجد طلبات بفروع معينة بانتظار السائق.')),
+                Text(state.t('No ready orders waiting for a driver.',
+                    'لا توجد طلبات جاهزة بانتظار السائق.')),
               for (final order in driverQueue)
                 workflowOrderCard(context, state, order, actions: [
                   ElevatedButton.icon(
@@ -2833,6 +3243,8 @@ class DriverSupervisorDashboard extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         OperationsTrackingPanel(state: state),
+        const SizedBox(height: 18),
+        StaffUsersPanel(state: state),
       ]),
     );
   }
@@ -2843,14 +3255,14 @@ class DriverSupervisorDashboard extends StatelessWidget {
       state,
       title: state.t('Assign driver', 'تعيين السائق'),
       label: state.t('Driver', 'السائق'),
-      items: state.staffNamesForRole(Role.driver),
+      items: state.staffNamesForRole(Role.driver, availableOnly: true),
       initialValue: order.hasDriver ? order.driver : null,
     );
     if (driver == null) return;
     await state.updateOrder(
       order.id,
       driver: driver,
-      stage: Stage.assigned,
+      stage: Stage.outForDelivery,
       timelineNote: 'Driver assigned to $driver',
     );
     if (context.mounted) {
@@ -2872,7 +3284,7 @@ class ReceptionistDashboard extends StatelessWidget {
     final staffName = state.currentStaffName.toLowerCase();
     final branchOrders = state.orders
         .where((o) =>
-            o.stage != Stage.delivered &&
+            !isDelivered(o) &&
             o.hasBranch &&
             o.receptionist.toLowerCase() == staffName)
         .toList();
@@ -2880,7 +3292,7 @@ class ReceptionistDashboard extends StatelessWidget {
     return Shell(
       state: state,
       role: role,
-      title: state.t('Receptionist can prepare branch-assigned orders.',
+      title: state.t('Receptionist can prepare assigned branch orders.',
           'موظف الاستقبال يجهز الطلبات المعينة للفرع.'),
       subtitle: state.t(
           'Mark orders as Ready when the branch work is complete.',
@@ -2894,6 +3306,12 @@ class ReceptionistDashboard extends StatelessWidget {
               '${branchOrders.length - ready}'),
         ]),
         const SizedBox(height: 18),
+        OrdersDashboardTable(
+          state: state,
+          orders: branchOrders,
+          title: state.t('My branch orders', 'طلبات الفرع الخاصة بي'),
+        ),
+        const SizedBox(height: 18),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(22),
@@ -2903,13 +3321,29 @@ class ReceptionistDashboard extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
               if (branchOrders.isEmpty)
-                Text(state.t('No branch-assigned orders yet.',
+                Text(state.t('No assigned branch orders yet.',
                     'لا توجد طلبات معينة لفرع حتى الآن.')),
               for (final order in branchOrders)
                 workflowOrderCard(context, state, order, actions: [
-                  if (order.stage != Stage.ready)
+                  if (stageRank(order.stage) < stageRank(Stage.completed))
+                    OutlinedButton.icon(
+                      onPressed: () => _setStage(context, order, Stage.completed,
+                          'Reception marked order completed'),
+                      icon: const Icon(Icons.check),
+                      label: Text(state.t('Completed', 'مكتمل')),
+                    ),
+                  if (stageRank(order.stage) < stageRank(Stage.onShop))
+                    OutlinedButton.icon(
+                      onPressed: () => _setStage(context, order, Stage.onShop,
+                          'Reception moved order on shop'),
+                      icon: const Icon(Icons.store),
+                      label: Text(state.t('On Shop', 'في المحل')),
+                    ),
+                  if (order.stage != Stage.ready &&
+                      order.stage != Stage.outForDelivery)
                     ElevatedButton.icon(
-                      onPressed: () => _markReady(context, order),
+                      onPressed: () => _setStage(context, order, Stage.ready,
+                          'Reception marked order ready'),
                       icon: const Icon(Icons.check_circle_outline),
                       label: Text(state.t('Mark ready', 'تحديد جاهز')),
                     ),
@@ -2921,16 +3355,13 @@ class ReceptionistDashboard extends StatelessWidget {
     );
   }
 
-  Future<void> _markReady(BuildContext context, Order order) async {
-    await state.updateOrder(
-      order.id,
-      stage: Stage.ready,
-      timelineNote: 'Reception marked order ready',
-    );
+  Future<void> _setStage(BuildContext context, Order order, Stage stage,
+      String timelineNote) async {
+    await state.updateOrder(order.id, stage: stage, timelineNote: timelineNote);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
-              state.t('Order marked ready.', 'تم تحويل الطلب إلى جاهز.'))));
+              state.t('Order status updated.', 'تم تحديث حالة الطلب.'))));
     }
   }
 }
@@ -2992,11 +3423,19 @@ Future<ReceptionAssignment?> showReceptionAssignmentDialog(
   var branch = order.hasBranch ? order.branch : adminBranches.first.name;
   const pending = 'Pending assignment';
   var receptionist = order.hasReceptionist ? order.receptionist : pending;
-  final receptionistItems = [pending, ...state.staffNamesForRole(Role.receptionist)];
   return showDialog<ReceptionAssignment>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
+      builder: (context, setDialogState) {
+        final receptionistItems = [
+          pending,
+          ...state.staffNamesForRole(Role.receptionist,
+              branch: branch, availableOnly: true)
+        ];
+        if (!receptionistItems.contains(receptionist)) {
+          receptionist = pending;
+        }
+        return AlertDialog(
         title: Text(state.t(
             'Assign branch and receptionist', 'تعيين الفرع وموظف الاستقبال')),
         content: SizedBox(
@@ -3010,8 +3449,10 @@ Future<ReceptionAssignment?> showReceptionAssignmentDialog(
                 for (final item in adminBranches)
                   DropdownMenuItem(value: item.name, child: Text(item.name)),
               ],
-              onChanged: (value) =>
-                  setDialogState(() => branch = value ?? branch),
+              onChanged: (value) => setDialogState(() {
+                branch = value ?? branch;
+                receptionist = pending;
+              }),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
@@ -3039,7 +3480,8 @@ Future<ReceptionAssignment?> showReceptionAssignmentDialog(
             child: Text(state.t('Save', 'حفظ')),
           ),
         ],
-      ),
+      );
+      },
     ),
   );
 }
@@ -3324,7 +3766,11 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
   final username = TextEditingController();
   final displayName = TextEditingController();
   final password = TextEditingController();
+  final branch = TextEditingController();
   Role selectedRole = Role.driver;
+  bool active = true;
+  bool availableToday = true;
+  bool homeServiceToday = true;
 
   AppState get state => widget.state;
 
@@ -3333,6 +3779,7 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
     username.dispose();
     displayName.dispose();
     password.dispose();
+    branch.dispose();
     super.dispose();
   }
 
@@ -3383,6 +3830,23 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
               onChanged: (value) => setState(() => selectedRole = value ?? selectedRole),
             ),
           ),
+          SizedBox(
+            width: 220,
+            child: TextField(
+              controller: branch,
+              decoration: InputDecoration(
+                  labelText: state.t('Branch', 'Branch')),
+            ),
+          ),
+          SizedBox(
+            width: 220,
+            child: SwitchListTile(
+              value: availableToday,
+              contentPadding: EdgeInsets.zero,
+              onChanged: (value) => setState(() => availableToday = value),
+              title: Text(state.t('Available today', 'Available today')),
+            ),
+          ),
           ElevatedButton.icon(
             onPressed: addUser,
             icon: const Icon(Icons.person_add_alt),
@@ -3397,7 +3861,11 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
               dataLabel(state.t('Username', 'Username')),
               dataLabel(state.t('Name', 'Name')),
               dataLabel(state.t('Type', 'Type')),
+              dataLabel(state.t('Branch', 'Branch')),
+              dataLabel(state.t('Available', 'Available')),
+              dataLabel(state.t('Home service', 'Home service')),
               dataLabel(state.t('Status', 'Status')),
+              dataLabel(state.t('Action', 'Action')),
             ],
             rows: [
               for (final item in state.staffUsers)
@@ -3405,7 +3873,23 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
                   DataCell(Text(item.username)),
                   DataCell(Text(item.displayName)),
                   DataCell(Text(roleLabel(item.role, state.isArabic))),
+                  DataCell(Text(item.branch.trim().isEmpty ? '-' : item.branch)),
+                  DataCell(Text(item.availableToday ? state.t('Yes', 'Yes') : state.t('No', 'No'))),
+                  DataCell(Text(item.homeServiceToday ? state.t('Yes', 'Yes') : state.t('No', 'No'))),
                   DataCell(Text(item.active ? state.t('Active', 'Active') : state.t('Off', 'Off'))),
+                  DataCell(Wrap(spacing: 8, children: [
+                    OutlinedButton(
+                      onPressed: () => editUser(item),
+                      child: Text(state.t('Edit', 'Edit')),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => unawaited(state.updateStaffUser(
+                          item.copyWith(availableToday: !item.availableToday))),
+                      child: Text(item.availableToday
+                          ? state.t('Set unavailable', 'Set unavailable')
+                          : state.t('Set available', 'Set available')),
+                    ),
+                  ])),
                 ]),
             ],
           ),
@@ -3420,6 +3904,10 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
       password: password.text,
       displayName: displayName.text.trim(),
       role: selectedRole,
+      branch: branch.text.trim(),
+      active: active,
+      availableToday: availableToday,
+      homeServiceToday: homeServiceToday,
     ));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok
@@ -3430,7 +3918,101 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
     username.clear();
     displayName.clear();
     password.clear();
+    branch.clear();
     setState(() {});
+  }
+
+  Future<void> editUser(StaffUser user) async {
+    final nameController = TextEditingController(text: user.displayName);
+    final passwordController = TextEditingController();
+    final branchController = TextEditingController(text: user.branch);
+    var role = user.role;
+    var isActive = user.active;
+    var isAvailable = user.availableToday;
+    var isHomeService = user.homeServiceToday;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('${state.t('Edit user', 'Edit user')} - ${user.username}'),
+          content: SizedBox(
+            width: 480,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(labelText: state.t('Staff name', 'Staff name')),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                decoration: InputDecoration(
+                    labelText: state.t('New password optional', 'New password optional')),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<Role>(
+                value: role,
+                decoration: InputDecoration(labelText: state.t('User type', 'User type')),
+                items: [
+                  for (final item in Role.values)
+                    DropdownMenuItem(
+                      value: item,
+                      child: Text(roleLabel(item, state.isArabic)),
+                    ),
+                ],
+                onChanged: (value) => setDialogState(() => role = value ?? role),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: branchController,
+                decoration: InputDecoration(labelText: state.t('Branch', 'Branch')),
+              ),
+              SwitchListTile(
+                value: isAvailable,
+                onChanged: (value) => setDialogState(() => isAvailable = value),
+                title: Text(state.t('Available today', 'Available today')),
+              ),
+              SwitchListTile(
+                value: isHomeService,
+                onChanged: (value) => setDialogState(() => isHomeService = value),
+                title: Text(state.t('Home service today', 'Home service today')),
+              ),
+              SwitchListTile(
+                value: isActive,
+                onChanged: (value) => setDialogState(() => isActive = value),
+                title: Text(state.t('Active login', 'Active login')),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(state.t('Cancel', 'Cancel')),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(state.t('Save', 'Save')),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved == true) {
+      final next = user.copyWith(
+        displayName: nameController.text.trim(),
+        password: passwordController.text.isEmpty ? user.password : passwordController.text,
+        role: role,
+        branch: branchController.text.trim(),
+        active: isActive,
+        availableToday: isAvailable,
+        homeServiceToday: isHomeService,
+      );
+      await state.updateStaffUser(next);
+    }
+    nameController.dispose();
+    passwordController.dispose();
+    branchController.dispose();
+    if (mounted) setState(() {});
   }
 }
 
@@ -3524,7 +4106,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final active = s.orders.where((o) => o.stage != Stage.delivered).length;
+    final active = s.orders.where((o) => !isDelivered(o)).length;
     return Shell(
       state: s,
       role: Role.admin,
@@ -3542,6 +4124,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
               '${complaints.length}'),
           metric(s.t('Branches', 'الفروع'), '${adminBranches.length}'),
         ]),
+        const SizedBox(height: 18),
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          sectionChip(s.t('Orders', 'الطلبات')),
+          sectionChip(s.t('Assignments', 'التعيينات')),
+          sectionChip(s.t('Delivery', 'التوصيل')),
+          sectionChip(s.t('Users', 'المستخدمون')),
+          sectionChip(s.t('Prices', 'الأسعار')),
+          sectionChip(s.t('History', 'السجل')),
+        ]),
+        const SizedBox(height: 18),
+        OrdersDashboardTable(
+          state: s,
+          orders: s.orders,
+          title: s.t('Orders dashboard', 'لوحة الطلبات'),
+        ),
         const SizedBox(height: 18),
         BranchAssignmentCard(state: s),
         const SizedBox(height: 18),
@@ -4179,5 +4776,7 @@ Widget badge(String text, Color color) => Container(
         color: color.withOpacity(.12), borderRadius: BorderRadius.circular(12)),
     child: Text(text,
         style: TextStyle(color: color, fontWeight: FontWeight.w700)));
-String buildTrackingLink(String id) =>
-    '${Uri.base.toString().split('#').first}#/track?order=$id';
+String buildTrackingLink(String id) {
+  final origin = html.window.location.origin;
+  return '$origin/track?order=${Uri.encodeComponent(id)}';
+}

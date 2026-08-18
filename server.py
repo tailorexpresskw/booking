@@ -144,15 +144,15 @@ HIGH_PRICE_AREAS = {
 
 
 DEFAULT_STAFF_USERS = [
-    {'username': 'admin', 'password': 'Admin123!', 'displayName': 'Admin', 'role': 'admin', 'active': True},
-    {'username': 'ops', 'password': 'Ops123!', 'displayName': 'Customer Service', 'role': 'employee', 'active': True},
-    {'username': 'reception-lead', 'password': 'ReceptionLead123!', 'displayName': 'Reception Lead', 'role': 'receptionistSupervisor', 'active': True},
-    {'username': 'driver-lead', 'password': 'DriverLead123!', 'displayName': 'Driver Lead', 'role': 'driverSupervisor', 'active': True},
-    {'username': 'reception', 'password': 'Reception123!', 'displayName': 'Aisha', 'role': 'receptionist', 'active': True},
-    {'username': 'fatima', 'password': 'Reception123!', 'displayName': 'Fatima', 'role': 'receptionist', 'active': True},
-    {'username': 'afroz', 'password': 'Tailor123!', 'displayName': 'AFROZ', 'role': 'tailor', 'active': True},
-    {'username': 'omar', 'password': 'Driver123!', 'displayName': 'Omar', 'role': 'driver', 'active': True},
-    {'username': 'khaled', 'password': 'Driver123!', 'displayName': 'Khaled', 'role': 'driver', 'active': True},
+    {'username': 'admin', 'password': 'Admin123!', 'displayName': 'Admin', 'role': 'admin', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'ops', 'password': 'Ops123!', 'displayName': 'Customer Service', 'role': 'employee', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'reception-lead', 'password': 'ReceptionLead123!', 'displayName': 'Reception Lead', 'role': 'receptionistSupervisor', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'driver-lead', 'password': 'DriverLead123!', 'displayName': 'Driver Lead', 'role': 'driverSupervisor', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'reception', 'password': 'Reception123!', 'displayName': 'Aisha', 'role': 'receptionist', 'branch': 'Yarmouk', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'fatima', 'password': 'Reception123!', 'displayName': 'Fatima', 'role': 'receptionist', 'branch': 'Hessa AlMubarak District', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'afroz', 'password': 'Tailor123!', 'displayName': 'AFROZ', 'role': 'tailor', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'omar', 'password': 'Driver123!', 'displayName': 'Omar', 'role': 'driver', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
+    {'username': 'khaled', 'password': 'Driver123!', 'displayName': 'Khaled', 'role': 'driver', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
 ]
 VALID_ROLES = {
     'admin',
@@ -314,7 +314,10 @@ def normalize_staff_user(user: dict, include_password: bool = True) -> dict:
         'username': str(user.get('username', '')).strip(),
         'displayName': str(user.get('displayName', '')).strip(),
         'role': str(user.get('role', 'employee')).strip(),
+        'branch': str(user.get('branch', '')).strip(),
         'active': bool(user.get('active', True)),
+        'availableToday': bool(user.get('availableToday', True)),
+        'homeServiceToday': bool(user.get('homeServiceToday', True)),
     }
     if normalized['role'] not in VALID_ROLES:
         normalized['role'] = 'employee'
@@ -372,11 +375,46 @@ def create_staff_user(payload: dict) -> dict:
         'password': password,
         'displayName': display_name,
         'role': role,
+        'branch': str(payload.get('branch', '')).strip(),
         'active': bool(payload.get('active', True)),
+        'availableToday': bool(payload.get('availableToday', True)),
+        'homeServiceToday': bool(payload.get('homeServiceToday', True)),
     })
     users.append(user)
     save_staff_users(users)
     return public_staff_user(user)
+
+
+def update_staff_user(username: str, payload: dict) -> dict:
+    target = username.strip().lower()
+    users = load_staff_users()
+    user = next((item for item in users if item.get('username', '').lower() == target), None)
+    if user is None:
+        raise ValueError('User not found.')
+    if 'displayName' in payload and str(payload.get('displayName', '')).strip():
+        user['displayName'] = str(payload.get('displayName', '')).strip()
+    if 'password' in payload and str(payload.get('password', '')):
+        user['password'] = str(payload.get('password', ''))
+    if 'role' in payload:
+        role = str(payload.get('role', '')).strip()
+        if role not in VALID_ROLES:
+            raise ValueError('Invalid staff role.')
+        user['role'] = role
+    if 'branch' in payload:
+        user['branch'] = str(payload.get('branch', '')).strip()
+    if 'active' in payload:
+        user['active'] = bool(payload.get('active'))
+    if 'availableToday' in payload:
+        user['availableToday'] = bool(payload.get('availableToday'))
+    if 'homeServiceToday' in payload:
+        user['homeServiceToday'] = bool(payload.get('homeServiceToday'))
+    normalized = normalize_staff_user(user)
+    for index, item in enumerate(users):
+        if item.get('username', '').lower() == target:
+            users[index] = normalized
+            break
+    save_staff_users(users)
+    return public_staff_user(normalized)
 
 
 def next_order_id(orders: list[dict]) -> str:
@@ -716,6 +754,20 @@ class TailorHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         match = re.fullmatch(r'/api/orders/([^/]+)', parsed.path)
         area_match = re.fullmatch(r'/api/area-prices/([^/]+)', parsed.path)
+        staff_match = re.fullmatch(r'/api/staff-users/([^/]+)', parsed.path)
+        if staff_match:
+            try:
+                payload = self._read_json_body()
+                user = update_staff_user(unquote(staff_match.group(1)), payload)
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+            except ValueError as exc:
+                status = 404 if str(exc) == 'User not found.' else 400
+                self._send_json({'error': str(exc)}, status=status)
+            else:
+                self._send_json(user)
+            return
+
         if area_match:
             try:
                 payload = self._read_json_body()
