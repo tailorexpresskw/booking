@@ -617,7 +617,7 @@ const seedOrders = <Order>[
     areaEn: 'North West Sulaibikhat',
     areaAr: 'شمال غرب الصليبيخات',
     address: 'North West Sulaibikhat, Block 4, Street 18, House 12',
-    service: 'Urgent repair',
+    service: 'Repair',
     preference: 'Women tailor',
     window: '29-07-2026, 7:30 PM - 8:00 PM',
     driver: 'Omar',
@@ -745,6 +745,12 @@ class AppState extends ChangeNotifier {
 
   void toggleLang() {
     isArabic = !isArabic;
+    notifyListeners();
+  }
+
+  void setArabic(bool value) {
+    if (isArabic == value) return;
+    isArabic = value;
     notifyListeners();
   }
 
@@ -943,7 +949,6 @@ class AppState extends ChangeNotifier {
         return false;
       }
       if (branchFilter.isNotEmpty &&
-          item.branch.trim().isNotEmpty &&
           item.branch.trim().toLowerCase() != branchFilter) {
         return false;
       }
@@ -1808,21 +1813,29 @@ class _BookingPageState extends State<BookingPage> {
   final notes = TextEditingController();
   Area area = kuwaitAreas.first;
   String service = 'Tailoring';
-  String preference = 'Women tailor';
+  String preference = '-';
 
   List<String> get serviceOptions => widget.state.isArabic
-      ? const ['تصليح', 'تصليح سريع', 'تفصال']
-      : const ['Repair', 'Urgent repair', 'Tailoring'];
+      ? const ['تصليح', 'تفصال']
+      : const ['Repair', 'Tailoring'];
 
   List<String> get preferenceOptions => widget.state.isArabic
-      ? const ['خياط', 'خياطه']
-      : const ['Men tailor', 'Women tailor'];
+      ? const ['-', 'خياط', 'خياطه']
+      : const ['-', 'Men tailor', 'Women tailor'];
   String window = '5:00 PM - 6:00 PM';
   DateTime visitDate = DateTime.now().add(const Duration(days: 1));
   double get selectedDeliveryPrice => widget.state.deliveryPriceFor(area.en);
   String money(double value) => formatKwd(value);
   String get visitDateText => formatVisitDate(visitDate);
   String get selectedVisitWindow => '$visitDateText, $window';
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.state.isArabic) {
+      widget.state.setArabic(true);
+    }
+  }
 
   void ensureActiveSelectedArea() {
     final active = widget.state.activeAreas;
@@ -1846,6 +1859,8 @@ class _BookingPageState extends State<BookingPage> {
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
+    if (!serviceOptions.contains(service)) service = serviceOptions.first;
+    if (!preferenceOptions.contains(preference)) preference = '-';
     return Shell(
       state: s,
       public: true,
@@ -1936,7 +1951,12 @@ class _BookingPageState extends State<BookingPage> {
                           : preferenceOptions.first,
                       preferenceOptions,
                       (v) => setState(() => preference = v!),
-                      width: wideField),
+                      width: wideField,
+                      validator: (value) =>
+                          value == null || value == '-'
+                              ? s.t('Choose tailor preference',
+                                  'اختر تفضيل الخياط')
+                              : null),
                   drop(
                       s,
                       s.t('Visit window', 'موعد الزيارة'),
@@ -2116,7 +2136,7 @@ class _BookingPageState extends State<BookingPage> {
 
   Widget drop(AppState s, String label, String value, List<String> items,
           ValueChanged<String?> onChanged,
-          {required double width}) =>
+          {required double width, String? Function(String?)? validator}) =>
       SizedBox(
         width: width,
         child: DropdownButtonFormField<String>(
@@ -2130,6 +2150,7 @@ class _BookingPageState extends State<BookingPage> {
                   child: Text(item, overflow: TextOverflow.ellipsis))
           ],
           onChanged: onChanged,
+          validator: validator,
         ),
       );
 
@@ -2935,6 +2956,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     String value, {
     double width = 150,
     int maxLines = 2,
+    Color? color,
+    FontWeight? weight,
   }) =>
       DataCell(SizedBox(
         width: width,
@@ -2943,8 +2966,32 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           maxLines: maxLines,
           overflow: TextOverflow.ellipsis,
           softWrap: true,
+          style: TextStyle(color: color, fontWeight: weight),
         ),
       ));
+
+  bool get canAssignBranch {
+    final role = state.role;
+    return role == Role.admin ||
+        role == Role.employee ||
+        role == Role.receptionistSupervisor;
+  }
+
+  bool get canAssignDriver {
+    final role = state.role;
+    return role == Role.admin || role == Role.driverSupervisor;
+  }
+
+  bool get canChangeStatus {
+    final role = state.role;
+    return role == Role.admin ||
+        role == Role.employee ||
+        role == Role.receptionistSupervisor ||
+        role == Role.driverSupervisor ||
+        role == Role.receptionist ||
+        role == Role.driver ||
+        role == Role.tailor;
+  }
 
   Future<void> assignBranchFromTable(BuildContext context, Order order) async {
     final assignment =
@@ -3016,7 +3063,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           ),
       ],
       child: Container(
-        height: 38,
+        width: 112,
+        height: 44,
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           border: Border.all(color: maroon.withOpacity(.7)),
@@ -3044,20 +3092,20 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         children: [
           compactTableButton(
             label: state.t('Branch', 'الفرع'),
-            onPressed: isDelivered(order)
+            onPressed: isDelivered(order) || !canAssignBranch
                 ? null
                 : () => assignBranchFromTable(context, order),
           ),
           compactTableButton(
             label: state.t('Driver', 'السائق'),
-            onPressed: isDelivered(order)
+            onPressed: isDelivered(order) || !canAssignDriver
                 ? null
                 : () => assignDriverFromTable(context, order),
           ),
-          statusMenu(order),
+          if (canChangeStatus) statusMenu(order),
           compactTableButton(
             label: state.t('Delivered', 'تم التسليم'),
-            onPressed: isDelivered(order)
+            onPressed: isDelivered(order) || !canChangeStatus
                 ? null
                 : () => setStatusFromTable(order, Stage.delivered),
           ),
@@ -3066,6 +3114,75 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             onPressed: () => openInvoicePrint(order, state),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget desktopActionMenu(BuildContext context, Order order) {
+    return PopupMenuButton<String>(
+      tooltip: state.t('Actions', 'الإجراءات'),
+      onSelected: (value) {
+        if (value == 'branch') assignBranchFromTable(context, order);
+        if (value == 'driver') assignDriverFromTable(context, order);
+        if (value == 'bill') openInvoicePrint(order, state);
+        if (value.startsWith('stage:')) {
+          final stage = stageFromKey(value.substring('stage:'.length));
+          setStatusFromTable(order, stage);
+        }
+      },
+      itemBuilder: (context) => [
+        if (canAssignBranch && !isDelivered(order))
+          PopupMenuItem(
+            value: 'branch',
+            child: Text(state.t('Assign branch', 'تعيين الفرع')),
+          ),
+        if (canAssignDriver && !isDelivered(order))
+          PopupMenuItem(
+            value: 'driver',
+            child: Text(state.t('Assign driver', 'تعيين السائق')),
+          ),
+        if (canChangeStatus && !isDelivered(order))
+          PopupMenuItem(
+            value: 'stage:${Stage.completed.name}',
+            child: Text(stageLabel(Stage.completed, state.isArabic)),
+          ),
+        if (canChangeStatus && !isDelivered(order))
+          PopupMenuItem(
+            value: 'stage:${Stage.onShop.name}',
+            child: Text(stageLabel(Stage.onShop, state.isArabic)),
+          ),
+        if (canChangeStatus && !isDelivered(order))
+          PopupMenuItem(
+            value: 'stage:${Stage.ready.name}',
+            child: Text(stageLabel(Stage.ready, state.isArabic)),
+          ),
+        if (canChangeStatus && !isDelivered(order))
+          PopupMenuItem(
+            value: 'stage:${Stage.outForDelivery.name}',
+            child: Text(stageLabel(Stage.outForDelivery, state.isArabic)),
+          ),
+        if (canChangeStatus && !isDelivered(order))
+          PopupMenuItem(
+            value: 'stage:${Stage.delivered.name}',
+            child: Text(stageLabel(Stage.delivered, state.isArabic)),
+          ),
+        PopupMenuItem(
+          value: 'bill',
+          child: Text(state.t('Print bill', 'طباعة الفاتورة')),
+        ),
+      ],
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          border: Border.all(color: maroon.withOpacity(.75), width: 1.4),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          state.t('Actions', 'الإجراءات'),
+          style: const TextStyle(color: maroon, fontWeight: FontWeight.w800),
+        ),
       ),
     );
   }
@@ -3088,8 +3205,10 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     );
   }
 
-  Widget mobileOrderCard(BuildContext context, Order order) {
+  Widget mobileOrderCard(BuildContext context, Order order,
+      {bool highlighted = false}) {
     return Card(
+      color: highlighted ? blush : null,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -3100,7 +3219,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             children: [
               Text(order.id,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800, color: maroon)),
+                      fontWeight: FontWeight.w800,
+                      color: highlighted ? maroon : ink)),
               badge(stageLabel(order.stage, state.isArabic),
                   stageColor(order.stage)),
               badge(
@@ -3132,6 +3252,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   Widget build(BuildContext context) {
     final shown = filteredOrders;
     final compact = MediaQuery.of(context).size.width < 760;
+    final activeShown = shown.where((order) => !isDelivered(order)).toList();
+    final nearestActiveId = activeShown.isEmpty ? null : activeShown.first.id;
     final stageFilters = [
       null,
       Stage.newBooking,
@@ -3207,7 +3329,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           Column(
             children: [
               for (final order in shown.take(80)) ...[
-                mobileOrderCard(context, order),
+                mobileOrderCard(context, order,
+                    highlighted: order.id == nearestActiveId),
                 const SizedBox(height: 12),
               ],
             ],
@@ -3217,7 +3340,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             scrollDirection: Axis.horizontal,
             child: DataTable(
               dataRowMinHeight: 92,
-              dataRowMaxHeight: 132,
+              dataRowMaxHeight: 118,
               headingRowHeight: 58,
               columnSpacing: 28,
               columns: [
@@ -3236,10 +3359,24 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               ],
               rows: [
                 for (final order in shown.take(120))
-                  DataRow(cells: [
-                    textCell(order.id, width: 96, maxLines: 1),
-                    DataCell(rowActions(context, order)),
-                    textCell(order.window, width: 220),
+                  DataRow(
+                  color: WidgetStateProperty.resolveWith((states) =>
+                      order.id == nearestActiveId ? blush : null),
+                  cells: [
+                    textCell(order.id,
+                        width: 96,
+                        maxLines: 1,
+                        color: order.id == nearestActiveId ? maroon : null,
+                        weight: order.id == nearestActiveId
+                            ? FontWeight.w800
+                            : null),
+                    DataCell(desktopActionMenu(context, order)),
+                    textCell(order.window,
+                        width: 220,
+                        color: order.id == nearestActiveId ? maroon : null,
+                        weight: order.id == nearestActiveId
+                            ? FontWeight.w800
+                            : null),
                     textCell(order.customer, width: 170),
                     textCell(order.mobile, width: 120, maxLines: 1),
                     textCell(order.area(state.isArabic), width: 190),
@@ -4237,6 +4374,14 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
 
   AppState get state => widget.state;
 
+  List<String> get branchChoices => [
+        '-',
+        for (final branch in adminBranches) branch.name,
+      ];
+
+  String normalizedBranchValue(String value) =>
+      branchChoices.contains(value.trim()) ? value.trim() : '-';
+
   @override
   void dispose() {
     username.dispose();
@@ -4295,10 +4440,20 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
           ),
           SizedBox(
             width: 220,
-            child: TextField(
-              controller: branch,
-              decoration: InputDecoration(
-                  labelText: state.t('Branch', 'Branch')),
+            child: DropdownButtonFormField<String>(
+              value: normalizedBranchValue(branch.text),
+              isExpanded: true,
+              decoration:
+                  InputDecoration(labelText: state.t('Branch', 'Branch')),
+              items: [
+                for (final item in branchChoices)
+                  DropdownMenuItem(
+                    value: item,
+                    child: Text(item, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (value) => setState(
+                  () => branch.text = value == '-' ? '' : value ?? ''),
             ),
           ),
           SizedBox(
@@ -4393,7 +4548,7 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
   Future<void> editUser(StaffUser user) async {
     final nameController = TextEditingController(text: user.displayName);
     final passwordController = TextEditingController();
-    final branchController = TextEditingController(text: user.branch);
+    var editedBranch = normalizedBranchValue(user.branch);
     var role = user.role;
     var isActive = user.active;
     var isAvailable = user.availableToday;
@@ -4431,9 +4586,20 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
                 onChanged: (value) => setDialogState(() => role = value ?? role),
               ),
               const SizedBox(height: 10),
-              TextField(
-                controller: branchController,
-                decoration: InputDecoration(labelText: state.t('Branch', 'Branch')),
+              DropdownButtonFormField<String>(
+                value: normalizedBranchValue(editedBranch),
+                isExpanded: true,
+                decoration: InputDecoration(
+                    labelText: state.t('Branch', 'Branch')),
+                items: [
+                  for (final item in branchChoices)
+                    DropdownMenuItem(
+                      value: item,
+                      child: Text(item, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (value) => setDialogState(
+                    () => editedBranch = value == '-' ? '' : value ?? ''),
               ),
               SwitchListTile(
                 value: isAvailable,
@@ -4470,7 +4636,7 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
         displayName: nameController.text.trim(),
         password: passwordController.text.isEmpty ? user.password : passwordController.text,
         role: role,
-        branch: branchController.text.trim(),
+        branch: editedBranch.trim() == '-' ? '' : editedBranch.trim(),
         active: isActive,
         availableToday: isAvailable,
         homeServiceToday: isHomeService,
@@ -4479,7 +4645,6 @@ class _StaffUsersPanelState extends State<StaffUsersPanel> {
     }
     nameController.dispose();
     passwordController.dispose();
-    branchController.dispose();
     if (mounted) setState(() {});
   }
 }
@@ -4812,6 +4977,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 dataLabel(s.t('Address / Location', 'العنوان / الموقع')),
                 dataLabel(s.t('Working Hours', 'ساعات العمل')),
                 dataLabel(s.t('Contact No.', 'رقم التواصل')),
+                dataLabel(s.t('Receptionists', 'موظفو الاستقبال')),
                 dataLabel(s.t('Status', 'الحالة')),
                 dataLabel(s.t('Action', 'الإجراء')),
               ],
@@ -4825,6 +4991,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             overflow: TextOverflow.ellipsis))),
                     DataCell(SizedBox(width: 220, child: Text(branch.hours))),
                     DataCell(Text(branch.contact)),
+                    DataCell(SizedBox(
+                        width: 220,
+                        child: Text(
+                          s
+                                  .staffNamesForRole(Role.receptionist,
+                                      branch: branch.name)
+                                  .isEmpty
+                              ? '-'
+                              : s
+                                  .staffNamesForRole(Role.receptionist,
+                                      branch: branch.name)
+                                  .join(', '),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ))),
                     DataCell(
                         Text(s.isArabic ? branch.statusAr : branch.statusEn)),
                     DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
