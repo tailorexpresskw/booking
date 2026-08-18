@@ -2730,6 +2730,145 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     return ['All', ...branches];
   }
 
+  DataCell textCell(
+    String value, {
+    double width = 150,
+    int maxLines = 2,
+  }) =>
+      DataCell(SizedBox(
+        width: width,
+        child: Text(
+          value,
+          maxLines: maxLines,
+          overflow: TextOverflow.ellipsis,
+          softWrap: true,
+        ),
+      ));
+
+  Future<void> assignBranchFromTable(BuildContext context, Order order) async {
+    final assignment =
+        await showReceptionAssignmentDialog(context, state, order);
+    if (assignment == null) return;
+    await state.updateOrder(
+      order.id,
+      branch: assignment.branch,
+      receptionist: assignment.receptionist,
+      stage: Stage.completed,
+      timelineNote:
+          'Branch assigned to ${assignment.branch} from orders dashboard',
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(state.t('Branch assignment saved.',
+          'تم حفظ تعيين الفرع.')),
+    ));
+  }
+
+  Future<void> assignDriverFromTable(BuildContext context, Order order) async {
+    final driver = await showStaffSelectionDialog(
+      context,
+      state,
+      title: state.t('Assign driver', 'تعيين السائق'),
+      label: state.t('Driver', 'السائق'),
+      items: state.staffNamesForRole(Role.driver, availableOnly: true),
+      initialValue: order.hasDriver ? order.driver : null,
+    );
+    if (driver == null) return;
+    await state.updateOrder(
+      order.id,
+      driver: driver,
+      stage: Stage.outForDelivery,
+      timelineNote: 'Driver assigned to $driver from orders dashboard',
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(state.t('Driver assignment saved.',
+          'تم حفظ تعيين السائق.')),
+    ));
+  }
+
+  Future<void> setStatusFromTable(Order order, Stage stage) async {
+    await state.updateOrder(
+      order.id,
+      stage: stage,
+      timelineNote:
+          'Status updated to ${stageLabel(stage, false)} from orders dashboard',
+    );
+  }
+
+  Widget statusMenu(Order order) {
+    final statusStages = [
+      Stage.completed,
+      Stage.onShop,
+      Stage.ready,
+      Stage.outForDelivery,
+      Stage.delivered,
+    ];
+    return PopupMenuButton<Stage>(
+      tooltip: state.t('Change status', 'تغيير الحالة'),
+      onSelected: (stage) => setStatusFromTable(order, stage),
+      itemBuilder: (context) => [
+        for (final stage in statusStages)
+          PopupMenuItem(
+            value: stage,
+            child: Text(stageLabel(stage, state.isArabic)),
+          ),
+      ],
+      child: Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: maroon.withOpacity(.7)),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          state.t('Status', 'الحالة'),
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: maroon,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget rowActions(BuildContext context, Order order) {
+    return SizedBox(
+      width: 430,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          compactTableButton(
+            label: state.t('Branch', 'الفرع'),
+            onPressed: isDelivered(order)
+                ? null
+                : () => assignBranchFromTable(context, order),
+          ),
+          compactTableButton(
+            label: state.t('Driver', 'السائق'),
+            onPressed: isDelivered(order)
+                ? null
+                : () => assignDriverFromTable(context, order),
+          ),
+          statusMenu(order),
+          compactTableButton(
+            label: state.t('Delivered', 'تم التسليم'),
+            onPressed: isDelivered(order)
+                ? null
+                : () => setStatusFromTable(order, Stage.delivered),
+          ),
+          compactTableButton(
+            label: state.t('Bill', 'فاتورة'),
+            onPressed: () => openInvoicePrint(order, state),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final shown = filteredOrders;
@@ -2807,11 +2946,13 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
-            dataRowMinHeight: 64,
-            dataRowMaxHeight: 78,
-            columnSpacing: 34,
+            dataRowMinHeight: 92,
+            dataRowMaxHeight: 132,
+            headingRowHeight: 58,
+            columnSpacing: 28,
             columns: [
               dataLabel('ID'),
+              dataLabel(state.t('Actions', 'الإجراءات')),
               dataLabel(state.t('Visit Date & Time', 'موعد الزيارة')),
               dataLabel(state.t('Customer', 'العميل')),
               dataLabel(state.t('Mobile', 'الهاتف')),
@@ -2827,15 +2968,16 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             rows: [
               for (final order in shown.take(120))
                 DataRow(cells: [
-                  DataCell(Text(order.id)),
-                  DataCell(Text(order.window)),
-                  DataCell(Text(order.customer)),
-                  DataCell(Text(order.mobile)),
-                  DataCell(Text(order.area(state.isArabic))),
-                  DataCell(Text(order.branch)),
-                  DataCell(Text(order.service)),
-                  DataCell(Text(order.receptionist)),
-                  DataCell(Text(order.driver)),
+                  textCell(order.id, width: 96, maxLines: 1),
+                  DataCell(rowActions(context, order)),
+                  textCell(order.window, width: 220),
+                  textCell(order.customer, width: 170),
+                  textCell(order.mobile, width: 120, maxLines: 1),
+                  textCell(order.area(state.isArabic), width: 190),
+                  textCell(order.branch, width: 210),
+                  textCell(order.service, width: 160),
+                  textCell(order.receptionist, width: 190),
+                  textCell(order.driver, width: 150),
                   DataCell(badge(
                       stageLabel(order.stage, state.isArabic),
                       stageColor(order.stage))),
@@ -2846,10 +2988,6 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                       order.paymentStatus.toLowerCase() == 'paid'
                           ? const Color(0xFF2D8A57)
                           : gold)),
-                  DataCell(OutlinedButton(
-                    onPressed: () => openInvoicePrint(order, state),
-                    child: Text(state.t('Bill', 'فاتورة')),
-                  )),
                 ]),
             ],
           ),
@@ -5127,7 +5265,7 @@ Widget tinyActionButton(String label) => ElevatedButton(
 
 Widget compactTableButton({
   required String label,
-  required VoidCallback onPressed,
+  required VoidCallback? onPressed,
 }) =>
     OutlinedButton(
       style: OutlinedButton.styleFrom(
