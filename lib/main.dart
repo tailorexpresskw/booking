@@ -2890,12 +2890,8 @@ class _TrackPageState extends State<TrackPage> {
     return Shell(
       state: s,
       public: true,
-      title: s.t(
-          'Customer-safe tracking page for pickup, tailoring and delivery status.',
-          'صفحة تتبع آمنة للعميل لحالة الاستلام والخياطة والتوصيل.'),
-      subtitle: s.t(
-          'Drivers can share this route with customers. The customer still cannot see internal dashboards.',
-          'يمكن للسائق مشاركة هذا الرابط مع العميل، لكن العميل لا يمكنه رؤية اللوحات الداخلية.'),
+      title: '',
+      subtitle: '',
       body: LayoutBuilder(
         builder: (context, constraints) {
           final narrow = constraints.maxWidth < 980;
