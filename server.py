@@ -4,7 +4,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
@@ -21,9 +21,21 @@ ORDERS_FILE = DATA_DIR / 'orders.json'
 STAFF_USERS_FILE = DATA_DIR / 'staff_users.json'
 AREA_PRICES_FILE = DATA_DIR / 'area_prices.json'
 PAYMENT_DRAFTS_FILE = DATA_DIR / 'payment_drafts.json'
+BOOKING_SCHEDULE_FILE = DATA_DIR / 'booking_schedule.json'
 STORE_LOCK = Lock()
 DEFAULT_LAT = 29.3759
 DEFAULT_LNG = 47.9774
+DEFAULT_TIME_SLOTS = [
+    '12:00 PM - 1:00 PM',
+    '1:00 PM - 2:00 PM',
+    '2:00 PM - 3:00 PM',
+    '3:00 PM - 4:00 PM',
+    '4:00 PM - 5:00 PM',
+    '5:00 PM - 6:00 PM',
+    '6:00 PM - 7:00 PM',
+    '7:00 PM - 8:00 PM',
+    '8:00 PM - 9:00 PM',
+]
 
 DEFAULT_AREA_NAMES = [
     'Abdali',
@@ -184,6 +196,11 @@ def ensure_storage() -> None:
         AREA_PRICES_FILE.write_text(json.dumps(default_area_prices(), ensure_ascii=False, indent=2), encoding='utf-8')
     if not PAYMENT_DRAFTS_FILE.exists():
         PAYMENT_DRAFTS_FILE.write_text('{}', encoding='utf-8')
+    if not BOOKING_SCHEDULE_FILE.exists():
+        BOOKING_SCHEDULE_FILE.write_text(
+            json.dumps(default_booking_schedule(), ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
 
 
 def default_area_prices() -> list[dict]:
@@ -208,6 +225,91 @@ def normalize_area_price(item: dict) -> dict:
         'price': max(price, 0.0),
         'active': bool(item.get('active', True)),
     }
+
+
+def date_key(value: datetime) -> str:
+    return value.strftime('%d-%m-%Y')
+
+
+def default_booking_schedule() -> dict:
+    today = datetime.now().date()
+    rows = []
+    for offset in range(1, 15):
+        day = datetime.combine(today + timedelta(days=offset), datetime.min.time())
+        rows.append({
+            'date': date_key(day),
+            'day': day.strftime('%A'),
+            'capacities': {slot: 2 for slot in DEFAULT_TIME_SLOTS},
+        })
+    return {
+        'enabled': True,
+        'slots': DEFAULT_TIME_SLOTS,
+        'workingDays': ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        'rows': rows,
+    }
+
+
+def normalize_booking_schedule(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        payload = default_booking_schedule()
+    slots = [
+        str(item).strip()
+        for item in payload.get('slots', DEFAULT_TIME_SLOTS)
+        if str(item).strip()
+    ] or list(DEFAULT_TIME_SLOTS)
+    working_days = [
+        str(item).strip()
+        for item in payload.get('workingDays', default_booking_schedule()['workingDays'])
+        if str(item).strip()
+    ]
+    rows = []
+    for row in payload.get('rows', []):
+        if not isinstance(row, dict):
+            continue
+        row_date = str(row.get('date', '')).strip()
+        if not row_date:
+            continue
+        capacities = row.get('capacities', {})
+        if isinstance(capacities, list):
+            capacities = {slot: capacities[index] if index < len(capacities) else 0 for index, slot in enumerate(slots)}
+        if not isinstance(capacities, dict):
+            capacities = {}
+        normalized_capacities = {}
+        for slot in slots:
+            try:
+                normalized_capacities[slot] = max(int(capacities.get(slot, 0)), 0)
+            except (TypeError, ValueError):
+                normalized_capacities[slot] = 0
+        rows.append({
+            'date': row_date,
+            'day': str(row.get('day', '')).strip(),
+            'capacities': normalized_capacities,
+        })
+    if not rows:
+        rows = default_booking_schedule()['rows']
+    return {
+        'enabled': bool(payload.get('enabled', True)),
+        'slots': slots,
+        'workingDays': working_days,
+        'rows': rows,
+    }
+
+
+def load_booking_schedule() -> dict:
+    ensure_storage()
+    with STORE_LOCK:
+        payload = json.loads(BOOKING_SCHEDULE_FILE.read_text(encoding='utf-8-sig'))
+    return normalize_booking_schedule(payload)
+
+
+def save_booking_schedule(payload: dict) -> dict:
+    normalized = normalize_booking_schedule(payload)
+    with STORE_LOCK:
+        BOOKING_SCHEDULE_FILE.write_text(
+            json.dumps(normalized, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+    return normalized
 
 
 def load_area_prices() -> list[dict]:
@@ -250,6 +352,15 @@ def update_area_price(area_en: str, payload: dict) -> dict:
     if area is None:
         area = {'areaEn': target, 'price': 5.0, 'active': True}
         prices.append(area)
+    new_area = str(payload.get('newAreaEn', payload.get('areaEn', area['areaEn']))).strip()
+    if new_area and new_area.lower() != area['areaEn'].lower():
+        if any(
+            item['areaEn'].lower() == new_area.lower()
+            for item in prices
+            if item is not area
+        ):
+            raise ValueError('Area name already exists.')
+        area['areaEn'] = new_area
     if 'price' in payload:
         try:
             price = float(payload['price'])
@@ -275,6 +386,7 @@ def normalize_order(order: dict) -> dict:
         'invoiceNo': '',
         'paymentMethod': 'UPay',
         'paymentStatus': 'pending',
+        'cancelReason': '',
     }
     for key, value in defaults.items():
         if key == 'timeline':
@@ -1068,6 +1180,9 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/area-prices':
             self._send_json(load_area_prices())
             return
+        if parsed.path == '/api/booking-schedule':
+            self._send_json(load_booking_schedule())
+            return
         if parsed.path == '/api/staff-users':
             self._send_json([public_staff_user(user) for user in load_staff_users()])
             return
@@ -1202,6 +1317,16 @@ class TailorHandler(SimpleHTTPRequestHandler):
         match = re.fullmatch(r'/api/orders/([^/]+)', parsed.path)
         area_match = re.fullmatch(r'/api/area-prices/([^/]+)', parsed.path)
         staff_match = re.fullmatch(r'/api/staff-users/([^/]+)', parsed.path)
+        if parsed.path == '/api/booking-schedule':
+            try:
+                payload = self._read_json_body()
+                schedule = save_booking_schedule(payload)
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+            else:
+                self._send_json(schedule)
+            return
+
         if staff_match:
             try:
                 payload = self._read_json_body()
@@ -1244,10 +1369,21 @@ class TailorHandler(SimpleHTTPRequestHandler):
             self._send_json({'error': 'Order not found'}, status=404)
             return
 
-        allowed = {'branch', 'receptionist', 'driver', 'tailor', 'stage', 'paymentStatus'}
+        allowed = {
+            'branch',
+            'receptionist',
+            'driver',
+            'tailor',
+            'stage',
+            'paymentStatus',
+            'window',
+            'notes',
+            'cancelReason',
+        }
         for key in allowed:
             if key in payload:
-                order[key] = str(payload.get(key, '')).strip() or 'Pending assignment'
+                fallback = 'Pending assignment' if key in {'branch', 'receptionist', 'driver', 'tailor'} else ''
+                order[key] = str(payload.get(key, '')).strip() or fallback
 
         note = str(payload.get('timelineNote', '')).strip()
         if note:

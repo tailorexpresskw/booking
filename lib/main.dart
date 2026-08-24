@@ -34,12 +34,14 @@ enum Stage {
   onWay,
   tailoring,
   ready,
-  delivered
+  delivered,
+  cancelled
 }
 
 const ordersStorageKey = 'tailor_express_orders_v1';
 const staffUsersStorageKey = 'tailor_express_staff_users_v1';
 const areaPricesStorageKey = 'tailor_express_area_prices_v1';
+const bookingScheduleStorageKey = 'tailor_express_booking_schedule_v1';
 const paymentDraftStoragePrefix = 'tailor_express_payment_draft_';
 const paymentGatewayOptions = <Map<String, String>>[
   {
@@ -90,9 +92,11 @@ String stageLabel(Stage stage, bool ar) => switch (stage) {
       Stage.delivered => ar
           ? '\u062a\u0645 \u0627\u0644\u062a\u0633\u0644\u064a\u0645'
           : 'Delivered',
+      Stage.cancelled => ar ? '\u0645\u0644\u063a\u064a' : 'Cancelled',
     };
 
 String legacyStageLabel(Stage stage, bool ar) => switch (stage) {
+      Stage.cancelled => ar ? '\u0645\u0644\u063a\u064a' : 'Cancelled',
       Stage.newBooking => ar ? 'طلب جديد' : 'New Order',
       Stage.completed || Stage.branchAssigned => ar ? 'مكتمل' : 'Completed',
       Stage.onShop || Stage.tailoring => ar ? 'في المحل' : 'On Shop',
@@ -127,6 +131,7 @@ Color stageColor(Stage stage) => switch (stage) {
       Stage.onWay =>
         const Color(0xFF2A63B5),
       Stage.delivered => const Color(0xFF2D8A57),
+      Stage.cancelled => const Color(0xFF9A3A2F),
     };
 
 int stageRank(Stage stage) => switch (stage) {
@@ -136,6 +141,7 @@ int stageRank(Stage stage) => switch (stage) {
       Stage.ready => 3,
       Stage.outForDelivery || Stage.assigned || Stage.onWay => 4,
       Stage.delivered => 5,
+      Stage.cancelled => 6,
     };
 
 String customerStageLabel(Stage stage, bool ar) => switch (stage) {
@@ -156,9 +162,11 @@ String customerStageLabel(Stage stage, bool ar) => switch (stage) {
       Stage.delivered => ar
           ? '\u062a\u0645 \u0627\u0644\u062a\u0633\u0644\u064a\u0645'
           : 'Delivered',
+      Stage.cancelled => ar ? '\u0645\u0644\u063a\u064a' : 'Cancelled',
     };
 
 String legacyCustomerStageLabel(Stage stage, bool ar) => switch (stage) {
+      Stage.cancelled => ar ? '\u0645\u0644\u063a\u064a' : 'Cancelled',
       Stage.newBooking => ar ? 'تم استلام الطلب' : 'Order received',
       Stage.completed ||
       Stage.branchAssigned ||
@@ -177,6 +185,8 @@ bool isReadyForDriverAssignment(Order order) =>
     order.stage == Stage.ready && order.hasBranch && !order.hasDriver;
 
 bool isDelivered(Order order) => order.stage == Stage.delivered;
+bool isClosedOrder(Order order) =>
+    order.stage == Stage.delivered || order.stage == Stage.cancelled;
 
 bool isDraftOrderId(String value) =>
     value.trim().toUpperCase().startsWith('DRAFT-');
@@ -255,6 +265,7 @@ class Order {
     String? receptionist,
     String? driver,
     String? tailor,
+    String? window,
     Stage? stage,
     List<String>? timeline,
     String? notes,
@@ -269,7 +280,7 @@ class Order {
         address: address,
         service: service,
         preference: preference,
-        window: window,
+        window: window ?? this.window,
         invoiceNo: invoiceNo,
         deliveryPrice: deliveryPrice,
         totalAmount: totalAmount,
@@ -447,6 +458,72 @@ class DeliveryAreaPrice {
       );
 }
 
+class BookingScheduleSettings {
+  const BookingScheduleSettings({
+    required this.enabled,
+    required this.slots,
+    required this.workingDays,
+    required this.rows,
+  });
+
+  final bool enabled;
+  final List<String> slots;
+  final Set<String> workingDays;
+  final Map<String, Map<String, int>> rows;
+
+  Map<String, dynamic> toJson() => {
+        'enabled': enabled,
+        'slots': slots,
+        'workingDays': workingDays.toList(),
+        'rows': [
+          for (final entry in rows.entries)
+            {
+              'date': entry.key,
+              'day': weekdayName(parseDateKey(entry.key) ?? DateTime.now()),
+              'capacities': entry.value,
+            }
+        ],
+      };
+
+  factory BookingScheduleSettings.fromJson(Map<String, dynamic> json) {
+    final slots = [
+      for (final item in (json['slots'] as List? ?? defaultBookingSlots))
+        if (item.toString().trim().isNotEmpty) item.toString().trim()
+    ];
+    final rows = <String, Map<String, int>>{};
+    for (final item in (json['rows'] as List? ?? const [])) {
+      if (item is! Map) continue;
+      final date = item['date']?.toString().trim() ?? '';
+      if (date.isEmpty) continue;
+      final rawCapacities = item['capacities'];
+      final capacities = <String, int>{};
+      if (rawCapacities is Map) {
+        for (final slot in slots) {
+          final value = rawCapacities[slot];
+          capacities[slot] =
+              value is num ? value.toInt().clamp(0, 999).toInt() : 0;
+        }
+      } else if (rawCapacities is List) {
+        for (var i = 0; i < slots.length; i++) {
+          final value = i < rawCapacities.length ? rawCapacities[i] : 0;
+          capacities[slots[i]] =
+              value is num ? value.toInt().clamp(0, 999).toInt() : 0;
+        }
+      }
+      rows[date] = capacities;
+    }
+    return BookingScheduleSettings(
+      enabled: json['enabled'] as bool? ?? true,
+      slots: slots.isEmpty ? defaultBookingSlots : slots,
+      workingDays: {
+        for (final item in (json['workingDays'] as List? ?? defaultWorkingDays))
+          if (item.toString().trim().isNotEmpty) item.toString().trim()
+      },
+      rows: rows.isEmpty ? defaultBookingScheduleRows() : rows,
+    );
+  }
+}
+
 const defaultStaffUsers = <StaffUser>[
   StaffUser(
       username: 'admin',
@@ -517,6 +594,58 @@ String formatVisitDate(DateTime value) {
   final day = value.day.toString().padLeft(2, '0');
   final month = value.month.toString().padLeft(2, '0');
   return '$day-$month-${value.year}';
+}
+
+DateTime? parseDateKey(String value) {
+  final match = RegExp(r'^(\d{1,2})-(\d{1,2})-(\d{4})$').firstMatch(value);
+  if (match == null) return null;
+  return DateTime(
+    int.parse(match.group(3)!),
+    int.parse(match.group(2)!),
+    int.parse(match.group(1)!),
+  );
+}
+
+String weekdayName(DateTime value) => switch (value.weekday) {
+      DateTime.monday => 'Monday',
+      DateTime.tuesday => 'Tuesday',
+      DateTime.wednesday => 'Wednesday',
+      DateTime.thursday => 'Thursday',
+      DateTime.friday => 'Friday',
+      DateTime.saturday => 'Saturday',
+      _ => 'Sunday',
+    };
+
+const defaultBookingSlots = <String>[
+  '12:00 PM - 1:00 PM',
+  '1:00 PM - 2:00 PM',
+  '2:00 PM - 3:00 PM',
+  '3:00 PM - 4:00 PM',
+  '4:00 PM - 5:00 PM',
+  '5:00 PM - 6:00 PM',
+  '6:00 PM - 7:00 PM',
+  '7:00 PM - 8:00 PM',
+  '8:00 PM - 9:00 PM',
+];
+
+const defaultWorkingDays = <String>[
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+Map<String, Map<String, int>> defaultBookingScheduleRows() {
+  final today = DateTime.now();
+  return {
+    for (var i = 1; i <= 14; i++)
+      formatVisitDate(today.add(Duration(days: i))): {
+        for (final slot in defaultBookingSlots) slot: 2,
+      }
+  };
 }
 
 final kuwaitAreas = <Area>[
@@ -764,9 +893,11 @@ class AppState extends ChangeNotifier {
   AppState() {
     _loadStaffUsers();
     _loadAreaPrices();
+    _loadBookingSchedule();
     _loadOrders();
     unawaited(refreshStaffUsers());
     unawaited(refreshAreaPrices());
+    unawaited(refreshBookingSchedule(quiet: true));
     unawaited(refreshOrders());
     _poller = Timer.periodic(const Duration(seconds: 8), (_) {
       unawaited(refreshOrders(quiet: true));
@@ -781,6 +912,12 @@ class AppState extends ChangeNotifier {
   final List<Order> orders = [];
   final List<StaffUser> staffUsers = [];
   final List<DeliveryAreaPrice> areaPrices = [];
+  BookingScheduleSettings bookingSchedule = BookingScheduleSettings(
+    enabled: true,
+    slots: defaultBookingSlots,
+    workingDays: defaultWorkingDays.toSet(),
+    rows: defaultBookingScheduleRows(),
+  );
   Timer? _poller;
   String notificationPermission = html.Notification.permission ?? 'default';
   int staffNotificationCount = 0;
@@ -1050,10 +1187,28 @@ class AppState extends ChangeNotifier {
 
   String get currentStaffName => currentStaff?.displayName ?? user;
 
-  List<Area> get activeAreas => kuwaitAreas.where((area) {
-        final price = areaPrice(area.en);
-        return price == null || price.active;
-      }).toList();
+  Area areaFromName(String areaEn) {
+    return kuwaitAreas.firstWhere(
+      (area) => area.en.toLowerCase() == areaEn.trim().toLowerCase(),
+      orElse: () => Area(areaEn.trim(), areaEn.trim()),
+    );
+  }
+
+  List<Area> get activeAreas {
+    final seen = <String>{};
+    final areas = <Area>[];
+    for (final price in areaPrices) {
+      if (!price.active || !seen.add(price.areaEn.toLowerCase())) continue;
+      areas.add(areaFromName(price.areaEn));
+    }
+    if (areas.isEmpty) {
+      for (final area in kuwaitAreas) {
+        if (seen.add(area.en.toLowerCase())) areas.add(area);
+      }
+    }
+    areas.sort((a, b) => a.en.compareTo(b.en));
+    return areas;
+  }
 
   DeliveryAreaPrice? areaPrice(String areaEn) {
     for (final item in areaPrices) {
@@ -1126,14 +1281,22 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> updateAreaPrice(String areaEn, double price, bool active) async {
-    final next =
-        DeliveryAreaPrice(areaEn: areaEn, price: price, active: active);
+  Future<void> updateAreaPrice(String areaEn, double price, bool active,
+      {String? newAreaEn}) async {
+    final next = DeliveryAreaPrice(
+        areaEn: (newAreaEn?.trim().isNotEmpty ?? false)
+            ? newAreaEn!.trim()
+            : areaEn,
+        price: price,
+        active: active);
     try {
       final response = await html.HttpRequest.request(
         apiUrl('/api/area-prices/${Uri.encodeComponent(areaEn)}'),
         method: 'PATCH',
-        sendData: jsonEncode(next.toJson()),
+        sendData: jsonEncode({
+          ...next.toJson(),
+          if (newAreaEn != null) 'newAreaEn': newAreaEn.trim(),
+        }),
         requestHeaders: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
@@ -1157,6 +1320,103 @@ class AppState extends ChangeNotifier {
     areaPrices.add(next);
     areaPrices.sort((a, b) => a.areaEn.compareTo(b.areaEn));
     _saveAreaPrices();
+  }
+
+  void _loadBookingSchedule() {
+    final raw = html.window.localStorage[bookingScheduleStorageKey];
+    if (raw == null || raw.isEmpty) {
+      _saveBookingSchedule();
+      return;
+    }
+    try {
+      bookingSchedule = BookingScheduleSettings.fromJson(
+          Map<String, dynamic>.from(jsonDecode(raw) as Map));
+    } catch (_) {
+      bookingSchedule = BookingScheduleSettings(
+        enabled: true,
+        slots: defaultBookingSlots,
+        workingDays: defaultWorkingDays.toSet(),
+        rows: defaultBookingScheduleRows(),
+      );
+    }
+  }
+
+  void _saveBookingSchedule() {
+    html.window.localStorage[bookingScheduleStorageKey] =
+        jsonEncode(bookingSchedule.toJson());
+  }
+
+  Future<void> refreshBookingSchedule({bool quiet = false}) async {
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/booking-schedule'),
+        method: 'GET',
+        requestHeaders: {'Accept': 'application/json'},
+      );
+      if ((response.status ?? 0) < 200 || (response.status ?? 0) >= 300) {
+        return;
+      }
+      bookingSchedule = BookingScheduleSettings.fromJson(
+          Map<String, dynamic>.from(
+              jsonDecode(response.responseText ?? '{}') as Map));
+      _saveBookingSchedule();
+      notifyListeners();
+    } catch (_) {
+      if (!quiet) notifyListeners();
+    }
+  }
+
+  Future<void> updateBookingSchedule(BookingScheduleSettings next) async {
+    bookingSchedule = next;
+    _saveBookingSchedule();
+    notifyListeners();
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/booking-schedule'),
+        method: 'PATCH',
+        sendData: jsonEncode(next.toJson()),
+        requestHeaders: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      if ((response.status ?? 0) >= 200 &&
+          (response.status ?? 0) < 300 &&
+          response.responseText != null) {
+        bookingSchedule = BookingScheduleSettings.fromJson(
+            Map<String, dynamic>.from(
+                jsonDecode(response.responseText!) as Map));
+        _saveBookingSchedule();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  List<String> availableSlotsForDate(DateTime date) {
+    if (!bookingSchedule.enabled) return const [];
+    final key = formatVisitDate(date);
+    final capacities = bookingSchedule.rows[key];
+    if (capacities == null) return const [];
+    return [
+      for (final slot in bookingSchedule.slots)
+        if ((capacities[slot] ?? 0) > 0) slot,
+    ];
+  }
+
+  bool isVisitDateAvailable(DateTime date) {
+    if (!bookingSchedule.enabled) return false;
+    if (!bookingSchedule.workingDays.contains(weekdayName(date))) return false;
+    return availableSlotsForDate(date).isNotEmpty;
+  }
+
+  DateTime nextAvailableVisitDate(DateTime fallback) {
+    final today = DateTime.now();
+    for (var offset = 0; offset <= 45; offset++) {
+      final day = DateTime(today.year, today.month, today.day)
+          .add(Duration(days: offset));
+      if (isVisitDateAvailable(day)) return day;
+    }
+    return fallback;
   }
 
   String apiUrl(String path) {
@@ -1231,6 +1491,7 @@ class AppState extends ChangeNotifier {
           a.receptionist != b.receptionist ||
           a.driver != b.driver ||
           a.tailor != b.tailor ||
+          a.window != b.window ||
           a.notes != b.notes ||
           a.deliveryPrice != b.deliveryPrice ||
           a.totalAmount != b.totalAmount ||
@@ -1684,6 +1945,8 @@ class AppState extends ChangeNotifier {
     String? receptionist,
     String? driver,
     String? tailor,
+    String? window,
+    String? notes,
     Stage? stage,
     String? paymentStatus,
     String? timelineNote,
@@ -1699,7 +1962,9 @@ class AppState extends ChangeNotifier {
       receptionist: receptionist,
       driver: driver,
       tailor: tailor,
+      window: window,
       stage: stage,
+      notes: notes,
       paymentStatus: paymentStatus,
       timeline: nextTimeline,
     );
@@ -1713,6 +1978,8 @@ class AppState extends ChangeNotifier {
           if (receptionist != null) 'receptionist': receptionist,
           if (driver != null) 'driver': driver,
           if (tailor != null) 'tailor': tailor,
+          if (window != null) 'window': window,
+          if (notes != null) 'notes': notes,
           if (stage != null) 'stage': stage.name,
           if (paymentStatus != null) 'paymentStatus': paymentStatus,
           if (timelineNote != null) 'timelineNote': timelineNote,
@@ -2182,6 +2449,16 @@ class _BookingPageState extends State<BookingPage> {
   String money(double value) => formatKwd(value);
   String get visitDateText => formatVisitDate(visitDate);
   String get selectedVisitWindow => '$visitDateText, $window';
+  List<String> get availableVisitSlots =>
+      widget.state.availableSlotsForDate(visitDate);
+
+  void ensureAvailableVisitSelection() {
+    visitDate = widget.state.nextAvailableVisitDate(visitDate);
+    final slots = availableVisitSlots;
+    if (slots.isNotEmpty && !slots.contains(window)) {
+      window = slots.first;
+    }
+  }
 
   @override
   void initState() {
@@ -2322,6 +2599,7 @@ class _BookingPageState extends State<BookingPage> {
   Widget bookingFormCard(double cardWidth) {
     final s = widget.state;
     ensureActiveSelectedArea();
+    ensureAvailableVisitSelection();
     final contentWidth = cardWidth - 44;
     final phone = cardWidth < 520;
     final wideField = phone ? contentWidth : 230.0;
@@ -2388,13 +2666,9 @@ class _BookingPageState extends State<BookingPage> {
                       s,
                       s.t('Visit window', 'موعد الزيارة'),
                       window,
-                      [
-                        '12:00 PM - 1:00 PM',
-                        '2:00 PM - 3:00 PM',
-                        '4:00 PM - 5:00 PM',
-                        '5:00 PM - 6:00 PM',
-                        '7:00 PM - 8:00 PM'
-                      ],
+                      availableVisitSlots.isEmpty
+                          ? [window]
+                          : availableVisitSlots,
                       (v) => setState(() => window = v!),
                       width: wideField),
                   visitDateField(s, width: wideField),
@@ -2513,52 +2787,79 @@ class _BookingPageState extends State<BookingPage> {
   Future<void> openAreaPicker() async {
     final s = widget.state;
     final areas = s.activeAreas;
+    final areaSearch = TextEditingController();
     final selected = await showModalBottomSheet<Area>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.72,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-                child: Text(
-                    s.t('Choose area',
-                        '\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u0646\u0637\u0642\u0629'),
-                    style: Theme.of(context).textTheme.titleLarge),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final query = areaSearch.text.trim().toLowerCase();
+          final shown = areas.where((item) {
+            return query.isEmpty ||
+                item.en.toLowerCase().contains(query) ||
+                item.ar.toLowerCase().contains(query);
+          }).toList();
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.72,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                            s.t('Choose area',
+                                '\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u0646\u0637\u0642\u0629'),
+                            style: Theme.of(context).textTheme.titleLarge),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: areaSearch,
+                          onChanged: (_) => setSheetState(() {}),
+                          decoration: InputDecoration(
+                            labelText: s.t('Search area', 'ابحث عن المنطقة'),
+                            suffixIcon: const Icon(Icons.search),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      itemCount: shown.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) {
+                        final item = shown[index];
+                        final chosen = item.en == area.en;
+                        return ListTile(
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                          tileColor: chosen
+                              ? const Color(0xFFFFF1CF)
+                              : const Color(0xFFFFFCF7),
+                          title: Text(item.name(s.isArabic)),
+                          subtitle: Text(
+                              '${s.t('Delivery', '\u0627\u0644\u062a\u0648\u0635\u064a\u0644')}: ${money(s.deliveryPriceFor(item.en))}'),
+                          trailing: chosen
+                              ? const Icon(Icons.check, color: gold)
+                              : null,
+                          onTap: () => Navigator.of(context).pop(item),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
-              Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  itemCount: areas.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                  itemBuilder: (context, index) {
-                    final item = areas[index];
-                    final chosen = item.en == area.en;
-                    return ListTile(
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      tileColor: chosen
-                          ? const Color(0xFFFFF1CF)
-                          : const Color(0xFFFFFCF7),
-                      title: Text(item.name(s.isArabic)),
-                      subtitle: Text(
-                          '${s.t('Delivery', '\u0627\u0644\u062a\u0648\u0635\u064a\u0644')}: ${money(s.deliveryPriceFor(item.en))}'),
-                      trailing:
-                          chosen ? const Icon(Icons.check, color: gold) : null,
-                      onTap: () => Navigator.of(context).pop(item),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
+    areaSearch.dispose();
     if (selected != null) setState(() => area = selected);
   }
 
@@ -2608,12 +2909,15 @@ class _BookingPageState extends State<BookingPage> {
       initialDate: visitDate.isBefore(firstDate) ? firstDate : visitDate,
       firstDate: firstDate,
       lastDate: firstDate.add(const Duration(days: 30)),
-      selectableDayPredicate: (day) {
-        // The admin schedule currently shows all days active unless changed.
-        return true;
-      },
+      selectableDayPredicate: widget.state.isVisitDateAvailable,
     );
-    if (picked != null) setState(() => visitDate = picked);
+    if (picked != null) {
+      setState(() {
+        visitDate = picked;
+        final slots = availableVisitSlots;
+        if (slots.isNotEmpty) window = slots.first;
+      });
+    }
   }
 
   void submit() {
@@ -2622,6 +2926,14 @@ class _BookingPageState extends State<BookingPage> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(widget.state.t('This area is currently unavailable.',
               '\u0647\u0630\u0647 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d\u0629 \u062d\u0627\u0644\u064a\u0627.'))));
+      return;
+    }
+    if (!widget.state.isVisitDateAvailable(visitDate) ||
+        !availableVisitSlots.contains(window)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(widget.state.t(
+              'Choose an available visit day and time.',
+              'اختر يوم ووقت زيارة متاحين.'))));
       return;
     }
     showPolicyGate();
@@ -3452,7 +3764,7 @@ class DashboardPage extends StatelessWidget {
 
     final visibleOrders = state.orders.where(hasConfirmedPayment).toList();
     final active = visibleOrders
-        .where((o) => hasConfirmedPayment(o) && !isDelivered(o))
+        .where((o) => hasConfirmedPayment(o) && !isClosedOrder(o))
         .toList();
     final staffName = state.currentStaffName.toLowerCase();
     final mine = switch (role) {
@@ -3580,6 +3892,13 @@ class OrdersDashboardTable extends StatefulWidget {
 
 class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   final search = TextEditingController();
+  final idFilter = TextEditingController();
+  final customerFilter = TextEditingController();
+  final mobileFilter = TextEditingController();
+  final areaFilter = TextEditingController();
+  final serviceFilter = TextEditingController();
+  final receptionistFilter = TextEditingController();
+  final driverFilter = TextEditingController();
   Stage? selectedStage;
   String selectedBranch = 'All';
 
@@ -3589,12 +3908,33 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   void initState() {
     super.initState();
     search.addListener(() => setState(() {}));
+    for (final controller in columnFilters) {
+      controller.addListener(() => setState(() {}));
+    }
   }
 
   @override
   void dispose() {
     search.dispose();
+    for (final controller in columnFilters) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  List<TextEditingController> get columnFilters => [
+        idFilter,
+        customerFilter,
+        mobileFilter,
+        areaFilter,
+        serviceFilter,
+        receptionistFilter,
+        driverFilter,
+      ];
+
+  bool matchesColumn(String value, TextEditingController controller) {
+    final query = controller.text.trim().toLowerCase();
+    return query.isEmpty || value.toLowerCase().contains(query);
   }
 
   List<Order> get filteredOrders {
@@ -3607,6 +3947,15 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         return false;
       }
       if (selectedBranch != 'All' && order.branch.toLowerCase() != branch) {
+        return false;
+      }
+      if (!matchesColumn(order.id, idFilter) ||
+          !matchesColumn(order.customer, customerFilter) ||
+          !matchesColumn(order.mobile, mobileFilter) ||
+          !matchesColumn('${order.areaEn} ${order.areaAr}', areaFilter) ||
+          !matchesColumn(order.service, serviceFilter) ||
+          !matchesColumn(order.receptionist, receptionistFilter) ||
+          !matchesColumn(order.driver, driverFilter)) {
         return false;
       }
       if (query.isEmpty) return true;
@@ -3628,6 +3977,27 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       return stageRank(a.stage).compareTo(stageRank(b.stage));
     });
     return orders;
+  }
+
+  Widget columnFilterField(TextEditingController controller, String label,
+      {double width = 150}) {
+    return SizedBox(
+      width: width,
+      child: TextField(
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: label,
+          isDense: true,
+          suffixIcon: controller.text.trim().isEmpty
+              ? null
+              : IconButton(
+                  tooltip: state.t('Clear', 'Clear'),
+                  icon: const Icon(Icons.close),
+                  onPressed: controller.clear,
+                ),
+        ),
+      ),
+    );
   }
 
   List<String> get branchOptions {
@@ -3682,6 +4052,11 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         role == Role.tailor;
   }
 
+  bool get canCancelOrReschedule {
+    final role = state.role;
+    return role == Role.admin || role == Role.employee;
+  }
+
   List<Stage> get allowedStatusStages {
     final role = state.role;
     if (role == Role.driver || role == Role.driverSupervisor) {
@@ -3699,6 +4074,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       Stage.ready,
       Stage.outForDelivery,
       Stage.delivered,
+      Stage.cancelled,
     ];
   }
 
@@ -3710,7 +4086,6 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       order.id,
       branch: assignment.branch,
       receptionist: assignment.receptionist,
-      stage: Stage.completed,
       timelineNote:
           'Branch assigned to ${assignment.branch} from orders dashboard',
     );
@@ -3733,7 +4108,6 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     await state.updateOrder(
       order.id,
       driver: driver,
-      stage: Stage.outForDelivery,
       timelineNote: 'Driver assigned to $driver from orders dashboard',
     );
     if (!mounted) return;
@@ -3754,6 +4128,33 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       timelineNote: stage == Stage.ready
           ? 'Order marked ready by $readyBy'
           : 'Status updated to ${stageLabel(stage, false)} from orders dashboard',
+    );
+  }
+
+  Future<void> cancelOrderFromTable(BuildContext context, Order order) async {
+    final reason = await showTextEntryDialog(
+      context,
+      title: state.t('Cancel order', 'إلغاء الطلب'),
+      label: state.t('Reason', 'السبب'),
+    );
+    if (reason == null) return;
+    await state.updateOrder(
+      order.id,
+      stage: Stage.cancelled,
+      timelineNote: reason.trim().isEmpty
+          ? 'Order cancelled from dashboard'
+          : 'Order cancelled: ${reason.trim()}',
+    );
+  }
+
+  Future<void> rescheduleOrderFromTable(
+      BuildContext context, Order order) async {
+    final nextWindow = await showRescheduleDialog(context, state, order);
+    if (nextWindow == null) return;
+    await state.updateOrder(
+      order.id,
+      window: nextWindow,
+      timelineNote: 'Visit rescheduled to $nextWindow',
     );
   }
 
@@ -3799,21 +4200,31 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         children: [
           compactTableButton(
             label: state.t('Branch', 'الفرع'),
-            onPressed: isDelivered(order) || !canAssignBranch
+            onPressed: isClosedOrder(order) || !canAssignBranch
                 ? null
                 : () => assignBranchFromTable(context, order),
           ),
           compactTableButton(
             label: state.t('Driver', 'السائق'),
-            onPressed: isDelivered(order) || !canAssignDriver
+            onPressed: isClosedOrder(order) || !canAssignDriver
                 ? null
                 : () => assignDriverFromTable(context, order),
           ),
-          if (canChangeStatus) statusMenu(order),
+          if (canChangeStatus && !isClosedOrder(order)) statusMenu(order),
+          if (canCancelOrReschedule && !isClosedOrder(order))
+            compactTableButton(
+              label: state.t('Reschedule', 'إعادة الموعد'),
+              onPressed: () => rescheduleOrderFromTable(context, order),
+            ),
+          if (canCancelOrReschedule && !isClosedOrder(order))
+            compactTableButton(
+              label: state.t('Cancel', 'إلغاء'),
+              onPressed: () => cancelOrderFromTable(context, order),
+            ),
           if (allowedStatusStages.contains(Stage.delivered))
             compactTableButton(
               label: state.t('Delivered', 'تم التسليم'),
-              onPressed: isDelivered(order) || !canChangeStatus
+              onPressed: isClosedOrder(order) || !canChangeStatus
                   ? null
                   : () => setStatusFromTable(context, order, Stage.delivered),
             ),
@@ -3832,6 +4243,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       onSelected: (value) {
         if (value == 'branch') assignBranchFromTable(context, order);
         if (value == 'driver') assignDriverFromTable(context, order);
+        if (value == 'reschedule') rescheduleOrderFromTable(context, order);
+        if (value == 'cancel') cancelOrderFromTable(context, order);
         if (value == 'bill') openInvoicePrint(order, state);
         if (value.startsWith('stage:')) {
           final stage = stageFromKey(value.substring('stage:'.length));
@@ -3839,22 +4252,32 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         }
       },
       itemBuilder: (context) => [
-        if (canAssignBranch && !isDelivered(order))
+        if (canAssignBranch && !isClosedOrder(order))
           PopupMenuItem(
             value: 'branch',
             child: Text(state.t('Assign branch', 'تعيين الفرع')),
           ),
-        if (canAssignDriver && !isDelivered(order))
+        if (canAssignDriver && !isClosedOrder(order))
           PopupMenuItem(
             value: 'driver',
             child: Text(state.t('Assign driver', 'تعيين السائق')),
           ),
-        if (canChangeStatus && !isDelivered(order))
+        if (canChangeStatus && !isClosedOrder(order))
           for (final stage in allowedStatusStages)
             PopupMenuItem(
               value: 'stage:${stage.name}',
               child: Text(stageLabel(stage, state.isArabic)),
             ),
+        if (canCancelOrReschedule && !isClosedOrder(order))
+          PopupMenuItem(
+            value: 'reschedule',
+            child: Text(state.t('Reschedule order', 'إعادة جدولة الطلب')),
+          ),
+        if (canCancelOrReschedule && !isClosedOrder(order))
+          PopupMenuItem(
+            value: 'cancel',
+            child: Text(state.t('Cancel order', 'إلغاء الطلب')),
+          ),
         PopupMenuItem(
           value: 'bill',
           child: Text(state.t('Print bill', 'طباعة الفاتورة')),
@@ -3942,7 +4365,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     final shown = filteredOrders;
     final compact = MediaQuery.of(context).size.width < 760;
     final visibleOrders = widget.orders.where(hasConfirmedPayment).toList();
-    final activeShown = shown.where((order) => !isDelivered(order)).toList();
+    final activeShown = shown.where((order) => !isClosedOrder(order)).toList();
     final nearestActiveId = activeShown.isEmpty ? null : activeShown.first.id;
     final stageFilters = [
       null,
@@ -3952,6 +4375,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       Stage.ready,
       Stage.outForDelivery,
       Stage.delivered,
+      Stage.cancelled,
     ];
     return adminCard(
       context,
@@ -4004,12 +4428,41 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                 selectedStage = null;
                 selectedBranch = 'All';
                 search.clear();
+                for (final controller in columnFilters) {
+                  controller.clear();
+                }
               });
             },
             icon: const Icon(Icons.refresh),
             label: Text(state.t('Reset', 'إعادة ضبط')),
           ),
         ]),
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            columnFilterField(idFilter, 'ID', width: 110),
+            const SizedBox(width: 10),
+            columnFilterField(customerFilter, state.t('Customer', 'العميل'),
+                width: 170),
+            const SizedBox(width: 10),
+            columnFilterField(mobileFilter, state.t('Mobile', 'الهاتف'),
+                width: 140),
+            const SizedBox(width: 10),
+            columnFilterField(areaFilter, state.t('Area', 'المنطقة'),
+                width: 170),
+            const SizedBox(width: 10),
+            columnFilterField(serviceFilter, state.t('Service', 'الخدمة'),
+                width: 150),
+            const SizedBox(width: 10),
+            columnFilterField(
+                receptionistFilter, state.t('Receptionist', 'الاستقبال'),
+                width: 170),
+            const SizedBox(width: 10),
+            columnFilterField(driverFilter, state.t('Driver', 'السائق'),
+                width: 150),
+          ]),
+        ),
         const SizedBox(height: 14),
         Text(
           state.t('Sorted by nearest home-service visit date first.',
@@ -4146,7 +4599,8 @@ class BranchAssignmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pendingBranch = state.orders
-        .where((o) => hasConfirmedPayment(o) && !isDelivered(o) && !o.hasBranch)
+        .where(
+            (o) => hasConfirmedPayment(o) && !isClosedOrder(o) && !o.hasBranch)
         .toList();
     return Card(
       child: Padding(
@@ -4181,7 +4635,6 @@ class BranchAssignmentCard extends StatelessWidget {
       order.id,
       branch: assignment.branch,
       receptionist: assignment.receptionist,
-      stage: Stage.completed,
       timelineNote: 'Branch assigned to ${assignment.branch}',
     );
     if (context.mounted) {
@@ -4237,7 +4690,6 @@ class DriverAssignmentCard extends StatelessWidget {
     await state.updateOrder(
       order.id,
       driver: driver,
-      stage: Stage.outForDelivery,
       timelineNote: 'Driver assigned to $driver',
     );
     if (context.mounted) {
@@ -4255,10 +4707,10 @@ class OperationsTrackingPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = state.orders
-        .where((o) => hasConfirmedPayment(o) && !isDelivered(o))
+        .where((o) => hasConfirmedPayment(o) && !isClosedOrder(o))
         .toList();
     final history = state.orders
-        .where((o) => hasConfirmedPayment(o) && isDelivered(o))
+        .where((o) => hasConfirmedPayment(o) && isClosedOrder(o))
         .toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Card(
@@ -4330,7 +4782,7 @@ class DriverOperationsPanel extends StatelessWidget {
                 icon: const Icon(Icons.map_outlined),
                 label: const Text('Google Maps'),
               ),
-              if (order.stage != Stage.outForDelivery && !isDelivered(order))
+              if (order.stage != Stage.outForDelivery && !isClosedOrder(order))
                 ElevatedButton.icon(
                   onPressed: () => _setStage(
                       context,
@@ -4340,7 +4792,7 @@ class DriverOperationsPanel extends StatelessWidget {
                   icon: const Icon(Icons.route),
                   label: Text(state.t('Out for Delivery', 'خارج للتوصيل')),
                 ),
-              if (!isDelivered(order))
+              if (!isClosedOrder(order))
                 ElevatedButton.icon(
                   onPressed: () => _setStage(context, order, Stage.delivered,
                       'Driver marked order delivered'),
@@ -4388,10 +4840,11 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pendingBranch = state.orders
-        .where((o) => hasConfirmedPayment(o) && !isDelivered(o) && !o.hasBranch)
+        .where(
+            (o) => hasConfirmedPayment(o) && !isClosedOrder(o) && !o.hasBranch)
         .toList();
     final active = state.orders
-        .where((o) => hasConfirmedPayment(o) && !isDelivered(o))
+        .where((o) => hasConfirmedPayment(o) && !isClosedOrder(o))
         .toList();
     return Shell(
       state: state,
@@ -4456,7 +4909,6 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
       order.id,
       branch: assignment.branch,
       receptionist: assignment.receptionist,
-      stage: Stage.completed,
       timelineNote: 'Branch assigned to ${assignment.branch}',
     );
     if (context.mounted) {
@@ -4479,7 +4931,8 @@ class DriverSupervisorDashboard extends StatelessWidget {
         .where((o) => hasConfirmedPayment(o) && isReadyForDriverAssignment(o))
         .toList();
     final assigned = state.orders
-        .where((o) => hasConfirmedPayment(o) && !isDelivered(o) && o.hasDriver)
+        .where(
+            (o) => hasConfirmedPayment(o) && !isClosedOrder(o) && o.hasDriver)
         .toList();
     return Shell(
       state: state,
@@ -4496,7 +4949,7 @@ class DriverSupervisorDashboard extends StatelessWidget {
           metric(state.t('Assigned drivers', 'السائقون المعينون'),
               '${assigned.length}'),
           metric(state.t('Active orders', 'الطلبات النشطة'),
-              '${state.orders.where((o) => hasConfirmedPayment(o) && !isDelivered(o)).length}'),
+              '${state.orders.where((o) => hasConfirmedPayment(o) && !isClosedOrder(o)).length}'),
         ]),
         const SizedBox(height: 18),
         OrdersDashboardTable(
@@ -4548,7 +5001,6 @@ class DriverSupervisorDashboard extends StatelessWidget {
     await state.updateOrder(
       order.id,
       driver: driver,
-      stage: Stage.outForDelivery,
       timelineNote: 'Driver assigned to $driver',
     );
     if (context.mounted) {
@@ -4570,7 +5022,7 @@ class ReceptionistDashboard extends StatelessWidget {
     final staffName = state.currentStaffName.toLowerCase();
     final staffBranch = state.currentStaff?.branch.trim().toLowerCase() ?? '';
     final branchOrders = state.orders.where((o) {
-      if (isDelivered(o) || !o.hasBranch) return false;
+      if (isClosedOrder(o) || !o.hasBranch) return false;
       if (staffBranch.isNotEmpty &&
           o.branch.trim().toLowerCase() == staffBranch) {
         return true;
@@ -4868,6 +5320,115 @@ Future<String?> showReadyByDialog(BuildContext context, AppState state) async {
   return result;
 }
 
+Future<String?> showTextEntryDialog(
+  BuildContext context, {
+  required String title,
+  required String label,
+}) async {
+  final controller = TextEditingController();
+  final result = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: 420,
+        child: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          decoration: InputDecoration(labelText: label),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Back'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+  controller.dispose();
+  return result;
+}
+
+Future<String?> showRescheduleDialog(
+  BuildContext context,
+  AppState state,
+  Order order,
+) async {
+  var selectedDate = state.nextAvailableVisitDate(
+    parseDateKey(order.window) ?? DateTime.now(),
+  );
+  var slots = state.availableSlotsForDate(selectedDate);
+  var selectedSlot = slots.contains(order.window)
+      ? order.window
+      : (slots.isEmpty ? '' : slots.first);
+
+  return showDialog<String>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text(state.t('Reschedule order', 'إعادة جدولة الطلب')),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(state.t('Visit day', 'يوم الزيارة')),
+              subtitle: Text(formatVisitDate(selectedDate)),
+              trailing: const Icon(Icons.calendar_month),
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: selectedDate,
+                  firstDate: DateTime.now(),
+                  lastDate: DateTime.now().add(const Duration(days: 45)),
+                  selectableDayPredicate: state.isVisitDateAvailable,
+                );
+                if (picked == null) return;
+                setDialogState(() {
+                  selectedDate = picked;
+                  slots = state.availableSlotsForDate(selectedDate);
+                  selectedSlot = slots.isEmpty ? '' : slots.first;
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: slots.contains(selectedSlot) ? selectedSlot : null,
+              decoration: InputDecoration(
+                  labelText: state.t('Visit time', 'وقت الزيارة')),
+              items: [
+                for (final slot in slots)
+                  DropdownMenuItem(value: slot, child: Text(slot)),
+              ],
+              onChanged: (value) =>
+                  setDialogState(() => selectedSlot = value ?? selectedSlot),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(state.t('Cancel', 'إلغاء')),
+          ),
+          ElevatedButton(
+            onPressed: selectedSlot.isEmpty
+                ? null
+                : () => Navigator.of(dialogContext)
+                    .pop('${formatVisitDate(selectedDate)}, $selectedSlot'),
+            child: Text(state.t('Save', 'حفظ')),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 Future<void> showBranchReceptionistsDialog(
   BuildContext context,
   AppState state,
@@ -5033,11 +5594,13 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
   @override
   Widget build(BuildContext context) {
     final query = search.text.trim().toLowerCase();
-    final areas = kuwaitAreas.where((area) {
+    final areas = state.areaPrices.where((area) {
+      final localized = state.areaFromName(area.areaEn).name(state.isArabic);
       return query.isEmpty ||
-          area.en.toLowerCase().contains(query) ||
-          area.name(state.isArabic).toLowerCase().contains(query);
-    }).toList();
+          area.areaEn.toLowerCase().contains(query) ||
+          localized.toLowerCase().contains(query);
+    }).toList()
+      ..sort((a, b) => a.areaEn.compareTo(b.areaEn));
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(22),
@@ -5091,11 +5654,8 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
     );
   }
 
-  DataRow _areaRow(BuildContext context, Area area) {
-    final price = state.areaPrice(area.en) ??
-        DeliveryAreaPrice(
-            areaEn: area.en,
-            price: highDeliveryPriceAreas.contains(area.en) ? 7.0 : 5.0);
+  DataRow _areaRow(BuildContext context, DeliveryAreaPrice price) {
+    final area = state.areaFromName(price.areaEn);
     return DataRow(cells: [
       DataCell(Text(area.name(state.isArabic))),
       DataCell(Text(formatKwd(price.price))),
@@ -5125,6 +5685,7 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
   }
 
   Future<void> editArea(BuildContext context, DeliveryAreaPrice area) async {
+    final nameController = TextEditingController(text: area.areaEn);
     final controller =
         TextEditingController(text: area.price.toStringAsFixed(3));
     var active = area.active;
@@ -5137,6 +5698,12 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
           content: SizedBox(
             width: 420,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                    labelText: state.t('Area name', 'اسم المنطقة')),
+              ),
+              const SizedBox(height: 10),
               TextField(
                 controller: controller,
                 keyboardType:
@@ -5164,18 +5731,28 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
       ),
     );
     if (saved != true) {
+      nameController.dispose();
       controller.dispose();
       return;
     }
+    final nextName = nameController.text.trim();
     final value = double.tryParse(controller.text.trim());
+    nameController.dispose();
     controller.dispose();
+    if (nextName.isEmpty) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.t('Enter an area name.', 'أدخل اسم المنطقة.'))));
+      return;
+    }
     if (value == null || value < 0) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(state.t('Enter a valid price.', 'أدخل سعرا صحيحا.'))));
       return;
     }
-    await state.updateAreaPrice(area.areaEn, value, active);
+    await state.updateAreaPrice(area.areaEn, value, active,
+        newAreaEn: nextName);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content:
@@ -5624,9 +6201,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   void initState() {
     super.initState();
-    appointmentEnabled = true;
+    appointmentEnabled = s.bookingSchedule.enabled;
     slotListController =
-        TextEditingController(text: '12pm,1pm,2pm,3pm,4pm,5pm,6pm,7pm,8pm');
+        TextEditingController(text: s.bookingSchedule.slots.join(','));
     dateRangeController =
         TextEditingController(text: '29-07-2026 to 31-07-2026');
     branchSearchController = TextEditingController();
@@ -5636,8 +6213,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     policyEnDetailController = TextEditingController();
     policyArDetailController = TextEditingController();
     capacityControllers = [
-      for (final _ in slotKeys) TextEditingController(text: '0')
+      for (final _ in slotKeys) TextEditingController(text: '2')
     ];
+    workingDays = s.bookingSchedule.workingDays.toSet();
     _loadPolicy(0);
     branchSearchController.addListener(() => setState(() {}));
   }
@@ -5660,7 +6238,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   Widget build(BuildContext context) {
     final visibleOrders = s.orders.where(hasConfirmedPayment).toList();
-    final active = visibleOrders.where((o) => !isDelivered(o)).length;
+    final active = visibleOrders.where((o) => !isClosedOrder(o)).length;
     return Shell(
       state: s,
       role: Role.admin,
@@ -5705,9 +6283,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               settingsBlock(
                 context,
                 title: s.t('Appointment Module', 'وحدة المواعيد'),
-                action: smallSaveButton(() => notifySaved(s.t(
-                    'Appointment module saved.',
-                    'تم حفظ إعداد وحدة المواعيد.'))),
+                action: smallSaveButton(() => unawaited(saveBookingSchedule())),
                 child: SizedBox(
                   width: 220,
                   child: DropdownButtonFormField<bool>(
@@ -5729,8 +6305,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               settingsBlock(
                 context,
                 title: s.t('Time Slots', 'الفترات الزمنية'),
-                action: smallSaveButton(() => notifySaved(
-                    s.t('Time slots saved.', 'تم حفظ الفترات الزمنية.'))),
+                action: smallSaveButton(
+                    () => unawaited(saveBookingSchedule(regenerate: true))),
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -5754,8 +6330,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               settingsBlock(
                 context,
                 title: s.t('Working Days', 'أيام العمل'),
-                action: smallSaveButton(() => notifySaved(
-                    s.t('Working days saved.', 'تم حفظ أيام العمل.'))),
+                action: smallSaveButton(
+                    () => unawaited(saveBookingSchedule(regenerate: true))),
                 child: Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -5788,9 +6364,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 context,
                 title: s.t('Capacity Generator', 'توليد السعة'),
                 action: OutlinedButton(
-                    onPressed: () => notifySaved(s.t(
-                        'Rows generated for working days.',
-                        'تم إنشاء الصفوف لأيام العمل.')),
+                    onPressed: () =>
+                        unawaited(saveBookingSchedule(regenerate: true)),
                     child: Text(s.t('Continue', 'متابعة'))),
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -5827,31 +6402,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
               settingsBlock(
                 context,
                 title: s.t('Existing Schedule Records', 'سجلات الجدول الحالية'),
-                action: smallSaveButton(() => notifySaved(
-                    s.t('Schedule records saved.', 'تم حفظ سجلات الجدول.'))),
+                action: smallSaveButton(() => unawaited(saveBookingSchedule())),
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
                     columns: [
                       dataLabel(s.t('Date', 'التاريخ')),
                       dataLabel(s.t('Day', 'اليوم')),
-                      for (final slot in slotKeys) dataLabel(slot),
+                      for (final slot in s.bookingSchedule.slots)
+                        dataLabel(slot),
+                      dataLabel(s.t('Action', 'الإجراء')),
                     ],
                     rows: [
-                      for (final row in scheduleRows)
+                      for (final row in s.bookingSchedule.rows.entries)
                         DataRow(cells: [
-                          DataCell(Text(row.date)),
-                          DataCell(Text(s.isArabic ? row.dayAr : row.dayEn)),
-                          for (final count in row.capacities)
+                          DataCell(Text(row.key)),
+                          DataCell(Text(dayLabel(weekdayName(
+                              parseDateKey(row.key) ?? DateTime.now())))),
+                          for (final slot in s.bookingSchedule.slots)
                             DataCell(SizedBox(
                                 width: 44,
-                                child: TextField(
-                                    controller:
-                                        TextEditingController(text: '$count'),
-                                    decoration: const InputDecoration(
-                                        isDense: true,
-                                        contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 8))))),
+                                child: Text('${row.value[slot] ?? 0}'))),
+                          DataCell(compactTableButton(
+                            label: s.t('Deactivate', 'إيقاف'),
+                            onPressed: () =>
+                                unawaited(deactivateScheduleDate(row.key)),
+                          )),
                         ]),
                     ],
                   ),
@@ -6374,6 +6950,65 @@ class _AdminDashboardState extends State<AdminDashboard> {
   void notifySaved(String message) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  List<String> get configuredSlots {
+    final slots = slotListController.text
+        .split(',')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    return slots.isEmpty ? defaultBookingSlots : slots;
+  }
+
+  Map<String, Map<String, int>> generatedScheduleRows() {
+    final slots = configuredSlots;
+    final today = DateTime.now();
+    final rows = <String, Map<String, int>>{};
+    for (var i = 1; i <= 30; i++) {
+      final day =
+          DateTime(today.year, today.month, today.day).add(Duration(days: i));
+      if (!workingDays.contains(weekdayName(day))) continue;
+      rows[formatVisitDate(day)] = {
+        for (var index = 0; index < slots.length; index++)
+          slots[index]: int.tryParse(
+                  capacityControllers[index % capacityControllers.length]
+                      .text
+                      .trim()) ??
+              2,
+      };
+    }
+    return rows;
+  }
+
+  Future<void> saveBookingSchedule({bool regenerate = false}) async {
+    final next = BookingScheduleSettings(
+      enabled: appointmentEnabled,
+      slots: configuredSlots,
+      workingDays: workingDays.toSet(),
+      rows: regenerate ? generatedScheduleRows() : s.bookingSchedule.rows,
+    );
+    await s.updateBookingSchedule(next);
+    notifySaved(s.t('Booking schedule saved.', 'تم حفظ جدول الحجوزات.'));
+    setState(() {});
+  }
+
+  Future<void> deactivateScheduleDate(String date) async {
+    final rows = {
+      for (final entry in s.bookingSchedule.rows.entries)
+        entry.key: Map<String, int>.from(entry.value)
+    };
+    rows[date] = {
+      for (final slot in s.bookingSchedule.slots) slot: 0,
+    };
+    await s.updateBookingSchedule(BookingScheduleSettings(
+      enabled: s.bookingSchedule.enabled,
+      slots: s.bookingSchedule.slots,
+      workingDays: s.bookingSchedule.workingDays,
+      rows: rows,
+    ));
+    notifySaved(s.t('Date deactivated.', 'تم إيقاف التاريخ.'));
+    setState(() {});
   }
 
   String dayLabel(String day) => switch (day) {
