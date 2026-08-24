@@ -758,6 +758,7 @@ class AppState extends ChangeNotifier {
   }
 
   bool isArabic = false;
+  bool _publicLanguageInitialized = false;
   Role? role;
   String user = '';
   StaffUser? currentStaff;
@@ -788,6 +789,7 @@ class AppState extends ChangeNotifier {
   }
 
   void toggleLang() {
+    _publicLanguageInitialized = true;
     isArabic = !isArabic;
     notifyListeners();
   }
@@ -796,6 +798,17 @@ class AppState extends ChangeNotifier {
     if (isArabic == value) return;
     isArabic = value;
     if (notify) notifyListeners();
+  }
+
+  void ensurePublicDefaultArabic() {
+    if (_publicLanguageInitialized) return;
+    _publicLanguageInitialized = true;
+    setArabic(true, notify: false);
+  }
+
+  void enterStaffArea() {
+    _publicLanguageInitialized = false;
+    setArabic(false, notify: false);
   }
 
   void _loadStaffUsers() {
@@ -1717,7 +1730,7 @@ class TailorWebApp extends StatelessWidget {
   Widget routeFor(Uri uri) {
     final path = uri.path.isEmpty ? '/' : uri.path;
     if (path == '/' || path == '/booking') {
-      state.setArabic(true, notify: false);
+      state.ensurePublicDefaultArabic();
       return BookingPage(
         state: state,
         paymentDraftId: uri.queryParameters['draft'],
@@ -1725,30 +1738,32 @@ class TailorWebApp extends StatelessWidget {
       );
     }
     if (path == '/track') {
+      state.ensurePublicDefaultArabic();
       return TrackPage(
           state: state,
           initialId: uri.queryParameters['order'],
           paymentResult: uri.queryParameters['payment']);
     }
     if (path == '/staff') {
-      state.setArabic(false, notify: false);
+      state.enterStaffArea();
       return StaffHubPage(state: state);
     }
     if (path == '/login' ||
         path == '/login/staff' ||
         path.startsWith('/login/')) {
-      state.setArabic(false, notify: false);
+      state.enterStaffArea();
       return LoginPage(state: state);
     }
     if (path == '/dashboard' ||
         path == '/dashboard/staff' ||
         path.startsWith('/dashboard/')) {
-      state.setArabic(false, notify: false);
+      state.enterStaffArea();
       if (!state.signedIn || state.role == null) {
         return LockedPage(state: state, role: null);
       }
       return DashboardPage(state: state, role: state.role!);
     }
+    state.ensurePublicDefaultArabic();
     return BookingPage(state: state);
   }
 }
@@ -2046,9 +2061,7 @@ class _BookingPageState extends State<BookingPage> {
   @override
   void initState() {
     super.initState();
-    if (!widget.state.isArabic) {
-      widget.state.setArabic(true);
-    }
+    widget.state.ensurePublicDefaultArabic();
     final draftId = widget.paymentDraftId;
     if (draftId != null) {
       final draft = widget.state.paymentDraft(draftId);
