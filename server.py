@@ -601,7 +601,7 @@ def build_order(payload: dict, orders: list[dict]) -> dict:
         'deliveryPrice': delivery_price,
         'totalAmount': delivery_price,
         'paymentMethod': str(payload.get('paymentMethod', 'UPay')).strip() or 'UPay',
-        'paymentStatus': 'pending',
+        'paymentStatus': str(payload.get('paymentStatus', 'pending')).strip() or 'pending',
         'timeline': timeline,
     }
 
