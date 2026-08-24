@@ -1870,6 +1870,38 @@ Widget brand({
   bool large = false,
   bool compact = false,
 }) {
+  final logoHeight = large ? 58.0 : (compact ? 34.0 : 40.0);
+  final logoWidth = large ? 340.0 : (compact ? 190.0 : 250.0);
+  final logo = Directionality(
+    textDirection: TextDirection.ltr,
+    child: Image.network(
+      '/icons/tailor-logo-full.png',
+      height: logoHeight,
+      width: logoWidth,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+      errorBuilder: (context, error, stackTrace) =>
+          fallbackBrand(large: large, compact: compact),
+    ),
+  );
+  if (!light) return logo;
+  return Container(
+    padding: EdgeInsets.symmetric(
+      horizontal: large ? 18 : 12,
+      vertical: large ? 12 : 8,
+    ),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: logo,
+  );
+}
+
+Widget fallbackBrand({
+  bool large = false,
+  bool compact = false,
+}) {
   final markSize = large ? 46.0 : 34.0;
   final textStyle = TextStyle(
     color: maroon,
@@ -1885,18 +1917,7 @@ Widget brand({
       Text('Tailor Express', style: textStyle),
     ]),
   );
-  if (!light) return logo;
-  return Container(
-    padding: EdgeInsets.symmetric(
-      horizontal: large ? 18 : 12,
-      vertical: large ? 12 : 8,
-    ),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(999),
-    ),
-    child: logo,
-  );
+  return logo;
 }
 
 class TailorMark extends StatelessWidget {
@@ -3168,7 +3189,8 @@ class DashboardPage extends StatelessWidget {
       return ReceptionistDashboard(state: state, role: role);
     }
 
-    final active = state.orders
+    final visibleOrders = state.orders.where(hasConfirmedPayment).toList();
+    final active = visibleOrders
         .where((o) => hasConfirmedPayment(o) && !isDelivered(o))
         .toList();
     final staffName = state.currentStaffName.toLowerCase();
@@ -3190,7 +3212,8 @@ class DashboardPage extends StatelessWidget {
           'هذا الرابط منفصل عن صفحات العميل العامة ومقفل حسب الدور.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
-          metric(state.t('All orders', 'كل الطلبات'), '${state.orders.length}'),
+          metric(
+              state.t('All orders', 'كل الطلبات'), '${visibleOrders.length}'),
           metric(
               state.t('Active orders', 'الطلبات النشطة'), '${active.length}'),
           metric(state.t('Open complaints', 'الشكاوى المفتوحة'),
@@ -3657,6 +3680,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   Widget build(BuildContext context) {
     final shown = filteredOrders;
     final compact = MediaQuery.of(context).size.width < 760;
+    final visibleOrders = widget.orders.where(hasConfirmedPayment).toList();
     final activeShown = shown.where((order) => !isDelivered(order)).toList();
     final nearestActiveId = activeShown.isEmpty ? null : activeShown.first.id;
     final stageFilters = [
@@ -3679,8 +3703,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             for (final stage in stageFilters)
               ChoiceChip(
                 label: Text(stage == null
-                    ? '${state.t('All', 'الكل')} ${widget.orders.length}'
-                    : '${stageLabel(stage, state.isArabic)} ${widget.orders.where((o) => hasConfirmedPayment(o) && stageRank(o.stage) == stageRank(stage)).length}'),
+                    ? '${state.t('All', 'الكل')} ${visibleOrders.length}'
+                    : '${stageLabel(stage, state.isArabic)} ${visibleOrders.where((o) => stageRank(o.stage) == stageRank(stage)).length}'),
                 selected: selectedStage == stage,
                 onSelected: (_) => setState(() => selectedStage = stage),
               ),
@@ -3732,7 +3756,20 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           style: const TextStyle(color: Color(0xFF756A5C)),
         ),
         const SizedBox(height: 14),
-        if (compact)
+        if (shown.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            child: Text(
+              visibleOrders.isEmpty
+                  ? state.t(
+                      'No confirmed orders yet. Failed or cancelled payment attempts are hidden.',
+                      'لا توجد طلبات مؤكدة حتى الآن. يتم إخفاء محاولات الدفع الفاشلة أو الملغاة.')
+                  : state.t('No orders match the selected filters.',
+                      'لا توجد طلبات تطابق الفلاتر المحددة.'),
+              style: const TextStyle(color: Color(0xFF756A5C)),
+            ),
+          )
+        else if (compact)
           Column(
             children: [
               for (final order in shown.take(80)) ...[
@@ -5361,8 +5398,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final active =
-        s.orders.where((o) => hasConfirmedPayment(o) && !isDelivered(o)).length;
+    final visibleOrders = s.orders.where(hasConfirmedPayment).toList();
+    final active = visibleOrders.where((o) => !isDelivered(o)).length;
     return Shell(
       state: s,
       role: Role.admin,
@@ -5374,7 +5411,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           'هذا الرابط الإداري يتضمن الآن نفس هيكل الإعدادات الذي عرضته: الجدولة وإدارة الفروع وتحرير السياسات باللغتين.'),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
-          metric(s.t('All orders', 'كل الطلبات'), '${s.orders.length}'),
+          metric(s.t('All orders', 'كل الطلبات'), '${visibleOrders.length}'),
           metric(s.t('Active orders', 'الطلبات النشطة'), '$active'),
           metric(s.t('Open complaints', 'الشكاوى المفتوحة'),
               '${complaints.length}'),
