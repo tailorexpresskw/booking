@@ -19,6 +19,7 @@ REPO_SEED_FILE = ROOT / 'data' / 'seed_orders.json'
 ORDERS_FILE = DATA_DIR / 'orders.json'
 STAFF_USERS_FILE = DATA_DIR / 'staff_users.json'
 AREA_PRICES_FILE = DATA_DIR / 'area_prices.json'
+PAYMENT_DRAFTS_FILE = DATA_DIR / 'payment_drafts.json'
 STORE_LOCK = Lock()
 DEFAULT_LAT = 29.3759
 DEFAULT_LNG = 47.9774
@@ -180,6 +181,8 @@ def ensure_storage() -> None:
         STAFF_USERS_FILE.write_text(json.dumps(DEFAULT_STAFF_USERS, ensure_ascii=False, indent=2), encoding='utf-8')
     if not AREA_PRICES_FILE.exists():
         AREA_PRICES_FILE.write_text(json.dumps(default_area_prices(), ensure_ascii=False, indent=2), encoding='utf-8')
+    if not PAYMENT_DRAFTS_FILE.exists():
+        PAYMENT_DRAFTS_FILE.write_text('{}', encoding='utf-8')
 
 
 def default_area_prices() -> list[dict]:
@@ -307,6 +310,42 @@ def save_orders(orders: list[dict]) -> None:
     ensure_storage()
     with STORE_LOCK:
         ORDERS_FILE.write_text(json.dumps(orders, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def load_payment_drafts() -> dict:
+    ensure_storage()
+    with STORE_LOCK:
+        payload = json.loads(PAYMENT_DRAFTS_FILE.read_text(encoding='utf-8-sig'))
+    return payload if isinstance(payload, dict) else {}
+
+
+def save_payment_drafts(drafts: dict) -> None:
+    ensure_storage()
+    with STORE_LOCK:
+        PAYMENT_DRAFTS_FILE.write_text(json.dumps(drafts, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def save_payment_draft(draft_id: str, draft: dict) -> None:
+    if not draft_id or not isinstance(draft, dict):
+        return
+    drafts = load_payment_drafts()
+    saved = dict(draft)
+    saved['draftId'] = draft_id
+    saved['savedAt'] = datetime.now().isoformat()
+    drafts[draft_id] = saved
+    save_payment_drafts(drafts)
+
+
+def get_payment_draft(draft_id: str) -> dict | None:
+    draft = load_payment_drafts().get(draft_id)
+    return draft if isinstance(draft, dict) else None
+
+
+def delete_payment_draft(draft_id: str) -> None:
+    drafts = load_payment_drafts()
+    if draft_id in drafts:
+        del drafts[draft_id]
+        save_payment_drafts(drafts)
 
 
 def normalize_staff_user(user: dict, include_password: bool = True) -> dict:
@@ -464,6 +503,9 @@ def create_upayments_payment(payload: dict) -> dict:
         raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
 
     order_id = str(payload.get('orderId', '')).strip() or next_order_id(load_orders())
+    draft = payload.get('draft')
+    if order_id.upper().startswith('DRAFT-') and isinstance(draft, dict):
+        save_payment_draft(order_id, draft)
     existing_order = next((item for item in load_orders() if str(item.get('id')) == order_id), None)
     if existing_order is not None:
         amount = float(existing_order.get('totalAmount') or existing_order.get('deliveryPrice') or payment_amount())
@@ -501,7 +543,7 @@ def create_upayments_payment(payload: dict) -> dict:
             'name': customer_name,
             'mobile': mobile,
         },
-        'returnUrl': f'{base}/track?order={encoded_order_id}&payment=success',
+        'returnUrl': f'{base}/track?order={encoded_order_id}&payment=return',
         'cancelUrl': f'{base}/track?order={encoded_order_id}&payment=failed',
         'notificationUrl': f'{base}/api/payments/webhook',
         'customerExtraData': order_id,
@@ -544,6 +586,147 @@ def create_upayments_payment(payload: dict) -> dict:
         'trackId': data.get('trackId'),
         'amount': amount,
     }
+
+
+def first_query_value(payload: dict, *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            value = value[0]
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ''
+
+
+def find_payment_status_value(payload: object) -> str:
+    status_keys = {
+        'status',
+        'result',
+        'payment_status',
+        'paymentStatus',
+        'transaction_status',
+        'transactionStatus',
+    }
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in status_keys and isinstance(value, str) and value.strip():
+                return value.strip()
+        for value in payload.values():
+            nested = find_payment_status_value(value)
+            if nested:
+                return nested
+    if isinstance(payload, list):
+        for value in payload:
+            nested = find_payment_status_value(value)
+            if nested:
+                return nested
+    return ''
+
+
+def normalize_payment_state(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {'captured', 'paid', 'success', 'succeeded', 'approved'}:
+        return 'paid'
+    if normalized in {
+        'failed',
+        'cancel',
+        'cancelled',
+        'canceled',
+        'declined',
+        'expired',
+        'void',
+        'error',
+    }:
+        return 'failed'
+    return 'pending'
+
+
+def check_upayments_payment_status(track_id: str) -> dict:
+    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
+    sandbox_mode = 'sandboxapi.upayments.com' in base_url.lower()
+    token = 'jtest123' if sandbox_mode else os.environ.get('UPAYMENTS_API_KEY', '').strip()
+    if not token:
+        raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
+    if not track_id:
+        return {'verified': False, 'status': 'pending', 'rawStatus': '', 'raw': {}}
+
+    request = urllib.request.Request(
+        f'{base_url}/api/v1/get-payment-status/{urllib.parse.quote(track_id, safe="")}',
+        headers={
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {token}',
+            'User-Agent': 'Mozilla/5.0 TailorExpressBooking/1.0',
+        },
+        method='GET',
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode('utf-8', errors='replace')
+        raise RuntimeError(f'UPayments status error {exc.code}: {detail}') from exc
+
+    raw_status = find_payment_status_value(result)
+    status = normalize_payment_state(raw_status)
+    return {
+        'verified': status == 'paid',
+        'status': status,
+        'rawStatus': raw_status,
+        'raw': result,
+    }
+
+
+def confirm_upayments_payment(payload: dict) -> dict:
+    params = payload.get('params')
+    if not isinstance(params, dict):
+        params = payload
+
+    draft_id = first_query_value(params, 'order', 'orderId', 'reference', 'reference_id')
+    track_id = first_query_value(
+        params,
+        'track_id',
+        'trackId',
+        'trackid',
+        'payment_id',
+        'paymentId',
+        'paymentID',
+    )
+
+    status = check_upayments_payment_status(track_id)
+    if status.get('status') != 'paid':
+        return status
+
+    orders = load_orders()
+    existing = next(
+        (
+            item
+            for item in orders
+            if str(item.get('paymentDraftId', '')).strip() == draft_id
+            or str(item.get('id', '')).strip() == draft_id
+        ),
+        None,
+    )
+    if existing is not None:
+        existing['paymentStatus'] = 'paid'
+        normalize_order(existing)
+        save_orders(orders)
+        return {**status, 'order': existing}
+
+    if not draft_id.upper().startswith('DRAFT-'):
+        return status
+
+    draft = get_payment_draft(draft_id)
+    if draft is None:
+        raise RuntimeError('Booking draft was not found. No order was created.')
+
+    try:
+        order = build_order({**draft, 'paymentStatus': 'paid', 'paymentDraftId': draft_id}, orders)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    orders.insert(0, order)
+    save_orders(orders)
+    delete_payment_draft(draft_id)
+    return {**status, 'order': order}
 
 def build_order(payload: dict, orders: list[dict]) -> dict:
     area_en = str(payload.get('areaEn', '')).strip()
@@ -602,6 +785,7 @@ def build_order(payload: dict, orders: list[dict]) -> dict:
         'totalAmount': delivery_price,
         'paymentMethod': str(payload.get('paymentMethod', 'UPay')).strip() or 'UPay',
         'paymentStatus': str(payload.get('paymentStatus', 'pending')).strip() or 'pending',
+        'paymentDraftId': str(payload.get('paymentDraftId', '')).strip(),
         'timeline': timeline,
     }
 
@@ -652,6 +836,23 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/staff-users':
             self._send_json([public_staff_user(user) for user in load_staff_users()])
             return
+        if parsed.path == '/api/payments/status':
+            query = urllib.parse.parse_qs(parsed.query)
+            track_id = (
+                query.get('track_id', [''])[0]
+                or query.get('trackId', [''])[0]
+                or query.get('trackid', [''])[0]
+                or query.get('payment_id', [''])[0]
+                or query.get('paymentId', [''])[0]
+                or query.get('paymentID', [''])[0]
+            )
+            try:
+                status = check_upayments_payment_status(track_id)
+            except RuntimeError as exc:
+                self._send_json({'error': str(exc), 'verified': False, 'status': 'pending'}, status=502)
+            else:
+                self._send_json(status)
+            return
 
         if WEB_ROOT.exists():
             candidate = (WEB_ROOT / parsed.path.lstrip('/')).resolve()
@@ -680,6 +881,20 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self._send_json({'error': f'Payment request failed: {exc}'}, status=502)
             else:
                 self._send_json(payment, status=201)
+            return
+
+        if parsed.path == '/api/payments/confirm':
+            try:
+                payload = self._read_json_body()
+                payment = confirm_upayments_payment(payload)
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+            except RuntimeError as exc:
+                self._send_json({'error': str(exc), 'verified': False, 'status': 'pending'}, status=502)
+            except Exception as exc:
+                self._send_json({'error': f'Payment confirmation failed: {exc}', 'verified': False, 'status': 'pending'}, status=502)
+            else:
+                self._send_json(payment)
             return
 
         if parsed.path == '/api/payments/webhook':

@@ -2,7 +2,7 @@
   "name": "Tailor Express Home Service",
   "short_name": "Tailor Express",
   "description": "Tailor Express home service booking and staff operations.",
-  "start_url": "/booking",
+  "start_url": "/staff",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

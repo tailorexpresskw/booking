@@ -165,6 +165,9 @@ bool isReadyForDriverAssignment(Order order) =>
 
 bool isDelivered(Order order) => order.stage == Stage.delivered;
 
+bool isDraftOrderId(String value) =>
+    value.trim().toUpperCase().startsWith('DRAFT-');
+
 bool hasConfirmedPayment(Order order) {
   final status = order.paymentStatus.trim().toLowerCase();
   return !{'failed', 'cancelled', 'canceled', 'void'}.contains(status);
@@ -1378,6 +1381,7 @@ class AppState extends ChangeNotifier {
         'method': method,
         'language': draft['language']?.toString() ?? (isArabic ? 'ar' : 'en'),
         'origin': html.window.location.origin,
+        'draft': draft,
       }),
       requestHeaders: {
         'Accept': 'application/json',
@@ -1412,6 +1416,59 @@ class AppState extends ChangeNotifier {
       amount: amount,
       method: method,
     );
+  }
+
+  Future<Map<String, dynamic>> verifyPaymentReturn(
+      Map<String, String> params) async {
+    final query = Uri(queryParameters: params).query;
+    final response = await html.HttpRequest.request(
+      apiUrl('/api/payments/status?$query'),
+      method: 'GET',
+      requestHeaders: {'Accept': 'application/json'},
+    );
+    final status = response.status ?? 0;
+    final body = response.responseText == null || response.responseText!.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map);
+    if (status < 200 || status >= 300) {
+      throw Exception(
+          body['error']?.toString() ?? 'Payment status could not be verified.');
+    }
+    return body;
+  }
+
+  Future<Map<String, dynamic>> confirmPaymentReturn(
+      Map<String, String> params) async {
+    final response = await html.HttpRequest.request(
+      apiUrl('/api/payments/confirm'),
+      method: 'POST',
+      sendData: jsonEncode({
+        'params': params,
+        'orderId': params['order'] ?? '',
+      }),
+      requestHeaders: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    );
+    final status = response.status ?? 0;
+    final body = response.responseText == null || response.responseText!.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map);
+    if (status < 200 || status >= 300) {
+      throw Exception(body['error']?.toString() ??
+          'Payment confirmation could not be verified.');
+    }
+    final created = body['order'];
+    if (created is Map) {
+      final order = Order.fromJson(Map<String, dynamic>.from(created));
+      orders.removeWhere((item) => item.id == order.id);
+      orders.insert(0, order);
+      _saveOrders();
+      notifyListeners();
+      body['orderObject'] = order;
+    }
+    return body;
   }
 
   Future<Order> createBooking({
@@ -1742,7 +1799,8 @@ class TailorWebApp extends StatelessWidget {
       return TrackPage(
           state: state,
           initialId: uri.queryParameters['order'],
-          paymentResult: uri.queryParameters['payment']);
+          paymentResult: uri.queryParameters['payment'],
+          paymentParams: uri.queryParameters);
     }
     if (path == '/staff') {
       state.enterStaffArea();
@@ -2810,19 +2868,30 @@ class _BookingPageState extends State<BookingPage> {
 
 class TrackPage extends StatefulWidget {
   const TrackPage(
-      {super.key, required this.state, this.initialId, this.paymentResult});
+      {super.key,
+      required this.state,
+      this.initialId,
+      this.paymentResult,
+      this.paymentParams = const {}});
   final AppState state;
   final String? initialId;
   final String? paymentResult;
+  final Map<String, String> paymentParams;
 
   @override
   State<TrackPage> createState() => _TrackPageState();
 }
 
 class _TrackPageState extends State<TrackPage> {
-  late final TextEditingController id =
-      TextEditingController(text: widget.initialId ?? '');
+  late final TextEditingController id = TextEditingController(
+      text:
+          isDraftOrderId(widget.initialId ?? '') ? '' : widget.initialId ?? '');
   Order? order;
+  bool checkingPayment = false;
+  bool? paymentSucceeded;
+  String paymentTitle = '';
+  String paymentDetail = '';
+  String retryDraftId = '';
 
   @override
   void initState() {
@@ -2834,48 +2903,83 @@ class _TrackPageState extends State<TrackPage> {
     final initial = widget.initialId ?? '';
     if (initial.isEmpty) return;
     final result = (widget.paymentResult ?? '').toLowerCase();
-    if (result == 'failed' || result == 'cancel' || result == 'cancelled') {
-      if (widget.state.paymentDraft(initial) != null) {
-        if (!mounted) return;
-        Navigator.of(context).pushReplacementNamed(
-            '/booking?payment=failed&draft=${Uri.encodeComponent(initial)}');
-        return;
-      }
+
+    if (isDraftOrderId(initial)) {
+      id.clear();
+      await handlePaymentReturn(initial, result);
+      return;
     }
 
-    order = widget.state.byId(initial);
     await widget.state.refreshOrders(quiet: true);
-    if (result == 'success') {
-      final existing = widget.state.byId(initial);
-      if (existing == null) {
-        final draft = widget.state.paymentDraft(initial);
-        if (draft != null) {
-          try {
-            final created = await widget.state
-                .createBookingFromDraft(draft, paymentStatus: 'paid');
-            widget.state.removePaymentDraft(initial);
-            if (!mounted) return;
-            Navigator.of(context)
-                .pushReplacementNamed('/track?order=${created.id}');
-            return;
-          } catch (error) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(widget.state.t(
-                    'Payment succeeded, but the booking could not be saved. Contact support before paying again.',
-                    '\u0646\u062c\u062d \u0627\u0644\u062f\u0641\u0639 \u0644\u0643\u0646 \u0644\u0645 \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632. \u062a\u0648\u0627\u0635\u0644 \u0645\u0639 \u0627\u0644\u062f\u0639\u0645 \u0642\u0628\u0644 \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062f\u0641\u0639.'))));
-          }
-        }
-      } else if (existing.paymentStatus.toLowerCase() != 'paid') {
-        await widget.state.updateOrder(initial,
-            paymentStatus: 'paid', timelineNote: 'UPay payment confirmed');
-      }
-    }
     if (!mounted) return;
     setState(() {
       final found = widget.state.byId(initial);
       order = found != null && hasConfirmedPayment(found) ? found : null;
     });
+  }
+
+  Future<void> handlePaymentReturn(String draftId, String result) async {
+    final s = widget.state;
+    if (result == 'failed' || result == 'cancel' || result == 'cancelled') {
+      if (!mounted) return;
+      setState(() {
+        paymentSucceeded = false;
+        retryDraftId = draftId;
+        paymentTitle = s.t('Payment was not completed.',
+            '\u0644\u0645 \u064a\u0643\u062a\u0645\u0644 \u0627\u0644\u062f\u0641\u0639.');
+        paymentDetail = s.t(
+            'No booking was saved. You can return to the payment step and try again.',
+            '\u0644\u0645 \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632. \u064a\u0645\u0643\u0646\u0643 \u0627\u0644\u0631\u062c\u0648\u0639 \u0644\u062e\u0637\u0648\u0629 \u0627\u0644\u062f\u0641\u0639 \u0648\u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.');
+      });
+      return;
+    }
+
+    setState(() => checkingPayment = true);
+    try {
+      final status = await s.confirmPaymentReturn(widget.paymentParams);
+      final verified = status['verified'] == true;
+      final paymentState = status['status']?.toString().toLowerCase() ?? '';
+      final confirmedOrder = status['orderObject'];
+      if (!verified || paymentState != 'paid' || confirmedOrder is! Order) {
+        if (!mounted) return;
+        setState(() {
+          paymentSucceeded = false;
+          retryDraftId = draftId;
+          paymentTitle = s.t('Payment is not confirmed yet.',
+              '\u0627\u0644\u062f\u0641\u0639 \u063a\u064a\u0631 \u0645\u0624\u0643\u062f \u062d\u062a\u0649 \u0627\u0644\u0622\u0646.');
+          paymentDetail = s.t(
+              'No booking was saved because UPay did not confirm a captured payment.',
+              '\u0644\u0645 \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632 \u0644\u0623\u0646 UPay \u0644\u0645 \u064a\u0624\u0643\u062f \u0639\u0645\u0644\u064a\u0629 \u062f\u0641\u0639 \u0645\u0643\u062a\u0645\u0644\u0629.');
+        });
+        return;
+      }
+
+      s.removePaymentDraft(draftId);
+      if (!mounted) return;
+      id.text = confirmedOrder.id;
+      setState(() {
+        order = confirmedOrder;
+        paymentSucceeded = true;
+        paymentTitle = s.t('Payment confirmed. Booking created.',
+            '\u062a\u0645 \u062a\u0623\u0643\u064a\u062f \u0627\u0644\u062f\u0641\u0639 \u0648\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062d\u062c\u0632.');
+        paymentDetail = s.t('Use this order number for tracking.',
+            '\u0627\u0633\u062a\u062e\u062f\u0645 \u0631\u0642\u0645 \u0627\u0644\u0637\u0644\u0628 \u0647\u0630\u0627 \u0644\u0644\u062a\u062a\u0628\u0639.');
+      });
+    } catch (error) {
+      if (!mounted) return;
+      final detail = error.toString().replaceFirst('Exception: ', '');
+      setState(() {
+        paymentSucceeded = false;
+        retryDraftId = draftId;
+        paymentTitle = s.t('Payment could not be verified.',
+            '\u062a\u0639\u0630\u0631 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062f\u0641\u0639.');
+        paymentDetail = s.t(
+            'No booking was saved. If money was deducted, contact support before paying again. $detail',
+            '\u0644\u0645 \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632. \u0625\u0630\u0627 \u062a\u0645 \u062e\u0635\u0645 \u0627\u0644\u0645\u0628\u0644\u063a\u060c \u062a\u0648\u0627\u0635\u0644 \u0645\u0639 \u0627\u0644\u062f\u0639\u0645 \u0642\u0628\u0644 \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062f\u0641\u0639. $detail');
+      });
+    } finally {
+      if (mounted) setState(() => checkingPayment = false);
+    }
   }
 
   @override
@@ -2941,43 +3045,106 @@ class _TrackPageState extends State<TrackPage> {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(22),
-        child: order == null
-            ? Text(s.t('Search an order to show its status.',
-                'ابحث عن طلب لإظهار حالته.'))
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: checkingPayment
+            ? Row(
                 children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text('${s.t('Order', 'الطلب')} ${order!.id}',
-                          style: Theme.of(context).textTheme.headlineSmall),
-                      badge(customerStageLabel(order!.stage, s.isArabic),
-                          stageColor(order!.stage)),
-                      badge(
-                        order!.paymentStatus.toLowerCase() == 'paid'
-                            ? s.t('Paid', 'مدفوع')
-                            : s.t('Payment pending', 'الدفع معلق'),
-                        order!.paymentStatus.toLowerCase() == 'paid'
-                            ? const Color(0xFF2D8A57)
-                            : gold,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  bullet(
-                      '${s.t('Current status', 'الحالة الحالية')}: ${customerStageLabel(order!.stage, s.isArabic)}'),
-                  bullet(
-                      '${s.t('Payment', 'الدفع')}: ${order!.paymentStatus.toLowerCase() == 'paid' ? s.t('Paid', 'مدفوع') : s.t('Pending', 'معلق')}'),
+                  const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2.5)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                      child: Text(s.t('Checking payment status...',
+                          'جاري التحقق من حالة الدفع...'))),
                 ],
-              ),
+              )
+            : paymentTitle.isNotEmpty
+                ? paymentNoticeCard()
+                : order == null
+                    ? Text(s.t('Search an order to show its status.',
+                        'ابحث عن طلب لإظهار حالته.'))
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text('${s.t('Order', 'الطلب')} ${order!.id}',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall),
+                              badge(
+                                  customerStageLabel(order!.stage, s.isArabic),
+                                  stageColor(order!.stage)),
+                              badge(
+                                order!.paymentStatus.toLowerCase() == 'paid'
+                                    ? s.t('Paid', 'مدفوع')
+                                    : s.t('Payment pending', 'الدفع معلق'),
+                                order!.paymentStatus.toLowerCase() == 'paid'
+                                    ? const Color(0xFF2D8A57)
+                                    : gold,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          bullet(
+                              '${s.t('Current status', 'الحالة الحالية')}: ${customerStageLabel(order!.stage, s.isArabic)}'),
+                          bullet(
+                              '${s.t('Payment', 'الدفع')}: ${order!.paymentStatus.toLowerCase() == 'paid' ? s.t('Paid', 'مدفوع') : s.t('Pending', 'معلق')}'),
+                        ],
+                      ),
       ),
     );
   }
 
+  Widget paymentNoticeCard() {
+    final s = widget.state;
+    final success = paymentSucceeded == true;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        badge(paymentTitle, success ? const Color(0xFF2D8A57) : maroon),
+        const SizedBox(height: 12),
+        Text(paymentDetail),
+        if (order != null) ...[
+          const SizedBox(height: 16),
+          Text('${s.t('Order', 'الطلب')}: ${order!.id}',
+              style:
+                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
+          const SizedBox(height: 8),
+          bullet('${s.t('Visit', 'الزيارة')}: ${order!.window}'),
+          bullet('${s.t('Area', 'المنطقة')}: ${order!.area(s.isArabic)}'),
+          bullet('${s.t('Payment', 'الدفع')}: ${s.t('Paid', 'مدفوع')}'),
+        ],
+        if (!success && retryDraftId.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pushReplacementNamed(
+                '/booking?payment=failed&draft=${Uri.encodeComponent(retryDraftId)}'),
+            child: Text(s.t('Try payment again', 'حاول الدفع مرة أخرى')),
+          ),
+        ],
+      ],
+    );
+  }
+
   void search() => setState(() {
+        if (isDraftOrderId(id.text)) {
+          order = null;
+          paymentSucceeded = false;
+          paymentTitle = widget.state.t('Payment was not completed.',
+              '\u0644\u0645 \u064a\u0643\u062a\u0645\u0644 \u0627\u0644\u062f\u0641\u0639.');
+          paymentDetail = widget.state.t(
+              'This is a temporary payment number, not a tracking number. Please finish payment to receive a real order number.',
+              '\u0647\u0630\u0627 \u0631\u0642\u0645 \u062f\u0641\u0639 \u0645\u0624\u0642\u062a \u0648\u0644\u064a\u0633 \u0631\u0642\u0645 \u062a\u062a\u0628\u0639. \u064a\u0631\u062c\u0649 \u0625\u0643\u0645\u0627\u0644 \u0627\u0644\u062f\u0641\u0639 \u0644\u0644\u062d\u0635\u0648\u0644 \u0639\u0644\u0649 \u0631\u0642\u0645 \u0637\u0644\u0628 \u062d\u0642\u064a\u0642\u064a.');
+          retryDraftId = id.text.trim();
+          return;
+        }
+        paymentTitle = '';
+        paymentDetail = '';
+        retryDraftId = '';
         final found = widget.state.byId(id.text);
         order = found != null && hasConfirmedPayment(found) ? found : null;
       });
