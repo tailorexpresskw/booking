@@ -1,4 +1,5 @@
 import json
+import html
 import os
 import re
 import urllib.error
@@ -495,6 +496,31 @@ def app_base_url(payload: dict) -> str:
     return origin or 'http://127.0.0.1:8090'
 
 
+def clean_gateway_error(detail: str) -> str:
+    if not detail:
+        return ''
+    title_match = re.search(r'<title[^>]*>(.*?)</title>', detail, re.IGNORECASE | re.DOTALL)
+    if title_match:
+        detail = title_match.group(1)
+    detail = re.sub(r'<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>', ' ', detail, flags=re.IGNORECASE)
+    detail = re.sub(r'<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>', ' ', detail, flags=re.IGNORECASE)
+    detail = re.sub(r'<[^>]+>', ' ', detail)
+    detail = html.unescape(detail)
+    detail = re.sub(r'\s+', ' ', detail).strip()
+    return detail[:300]
+
+
+def is_valid_payment_url(value: str) -> bool:
+    if not value or '<' in value or '>' in value:
+        return False
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        return False
+    if '/assets/' in parsed.path:
+        return False
+    return True
+
+
 def create_upayments_payment(payload: dict) -> dict:
     base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
     sandbox_mode = 'sandboxapi.upayments.com' in base_url.lower()
@@ -564,22 +590,37 @@ def create_upayments_payment(payload: dict) -> dict:
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
+            raw = response.read().decode('utf-8')
+            result = json.loads(raw)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode('utf-8', errors='replace')
-        raise RuntimeError(f'UPayments error {exc.code}: {detail}') from exc
+        cleaned = clean_gateway_error(detail)
+        if detail.lstrip().lower().startswith(('<!doctype', '<html')):
+            cleaned = cleaned or 'HTML error page returned.'
+            raise RuntimeError(
+                f'UPayments error {exc.code}: {cleaned}. Check UPAYMENTS_BASE_URL and live API key.'
+            ) from exc
+        raise RuntimeError(f'UPayments error {exc.code}: {cleaned or detail[:300]}') from exc
+    except json.JSONDecodeError as exc:
+        cleaned = clean_gateway_error(raw)
+        raise RuntimeError(f'UPayments returned a non-JSON response: {cleaned or raw[:300]}') from exc
 
     data = result.get('data') if isinstance(result, dict) else None
+    if isinstance(result, dict) and result.get('status') is False:
+        message = str(result.get('message', '')).strip() or 'Payment request was rejected.'
+        raise RuntimeError(f'UPayments rejected the payment request: {message}')
     if not isinstance(data, dict):
-        raise RuntimeError('Unexpected UPayments response.')
+        message = str(result.get('message', '')).strip() if isinstance(result, dict) else ''
+        raise RuntimeError(message or 'Unexpected UPayments response.')
     payment_url = (
         data.get('link')
         or data.get('paymentUrl')
         or data.get('paymentURL')
         or data.get('url')
     )
-    if not payment_url:
-        raise RuntimeError('UPayments did not return a payment URL.')
+    payment_url = str(payment_url or '').strip()
+    if not is_valid_payment_url(payment_url):
+        raise RuntimeError('UPayments did not return a valid payment URL.')
     return {
         'provider': 'upayments',
         'paymentUrl': payment_url,
