@@ -521,10 +521,18 @@ def is_valid_payment_url(value: str) -> bool:
     return True
 
 
+def upayments_token(base_url: str) -> str:
+    configured = os.environ.get('UPAYMENTS_API_KEY', '').strip()
+    if configured:
+        return configured
+    if 'sandboxapi.upayments.com' in base_url.lower():
+        return 'jtest123'
+    return ''
+
+
 def create_upayments_payment(payload: dict) -> dict:
     base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
-    sandbox_mode = 'sandboxapi.upayments.com' in base_url.lower()
-    token = 'jtest123' if sandbox_mode else os.environ.get('UPAYMENTS_API_KEY', '').strip()
+    token = upayments_token(base_url)
     if not token:
         raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
 
@@ -684,8 +692,7 @@ def normalize_payment_state(status: str) -> str:
 
 def check_upayments_payment_status(track_id: str) -> dict:
     base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
-    sandbox_mode = 'sandboxapi.upayments.com' in base_url.lower()
-    token = 'jtest123' if sandbox_mode else os.environ.get('UPAYMENTS_API_KEY', '').strip()
+    token = upayments_token(base_url)
     if not token:
         raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
     if not track_id:
