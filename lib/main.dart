@@ -2934,21 +2934,6 @@ class _TrackPageState extends State<TrackPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                     onPressed: search, child: Text(s.t('Search', 'بحث')))),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final item in widget.state.orders.take(4))
-                  ActionChip(
-                    label: Text(item.id),
-                    onPressed: () {
-                      id.text = item.id;
-                      search();
-                    },
-                  ),
-              ],
-            ),
           ],
         ),
       ),
