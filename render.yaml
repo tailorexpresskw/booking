@@ -19,7 +19,7 @@ services:
       - key: UPAYMENTS_API_KEY
         sync: false
       - key: UPAYMENTS_BASE_URL
-        value: https://sandboxapi.upayments.com
+        value: https://uapi.upayments.com
       - key: PAYMENT_AMOUNT_KWD
         value: 3.500
       - key: APP_BASE_URL

@@ -47,12 +47,13 @@ Admin can create extra staff users from the Staff Users panel. Prototype staff u
 The app uses a backend UPay/UPayments hosted-checkout endpoint at `/api/payments/create`.
 Set these environment variables on the server or Render:
 
-- `UPAYMENTS_API_KEY`: server Bearer token from UPay/UPayments. Never expose this in Flutter/web code.
-- `UPAYMENTS_BASE_URL`: UPayments API base URL. Use `https://sandboxapi.upayments.com` for sandbox unless UPay gives you a different live URL.
+- `UPAYMENTS_API_KEY`: plain live Bearer token from UPay/UPayments. Never expose this in Flutter/web code. Do not use the encrypted API key here.
+- `UPAYMENTS_SANDBOX_API_KEY`: optional sandbox Bearer token. If omitted, the backend uses the UPayments whitelabel sandbox token for test checkout only.
+- `UPAYMENTS_BASE_URL`: UPayments API base URL. Use `https://sandboxapi.upayments.com` for sandbox tests. Use `https://uapi.upayments.com` for live UInterfaceV2 payments. Do not use the old V1 host `https://api.upayments.com`.
 - `APP_BASE_URL`: public app URL used for return/cancel/webhook URLs, for example `https://tailor-express-booking.onrender.com`.
 - `PAYMENT_AMOUNT_KWD`: default home-service amount, currently `3.500`.
 
-When `UPAYMENTS_BASE_URL` is `https://sandboxapi.upayments.com`, the backend automatically uses UPayments' public non-whitelabel sandbox token `jtest123` so checkout can be tested even before live production credentials are ready. For real payments, replace `UPAYMENTS_BASE_URL` with the production UInterfaceV2 charge API base URL from UPayments; the backend will then use `UPAYMENTS_API_KEY`.
+When `UPAYMENTS_BASE_URL` is `https://sandboxapi.upayments.com`, the checkout is sandbox-only and will not create a real debit/settlement. For real KNET/Apple Pay collection, set `UPAYMENTS_BASE_URL` to `https://uapi.upayments.com` and set `UPAYMENTS_API_KEY` to the live plain API token. The backend automatically maps the old V1 live URL `https://api.upayments.com` to the V2 live URL, but Render should still be configured with the correct V2 value.
 
 Customers accept the policies first, then they are redirected to the hosted UPay checkout page.
 

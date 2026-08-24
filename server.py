@@ -521,6 +521,20 @@ def is_valid_payment_url(value: str) -> bool:
     return True
 
 
+def upayments_base_url() -> str:
+    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').strip().rstrip('/')
+    normalized = base_url.lower()
+    legacy_live_urls = {
+        'http://api.upayments.com',
+        'https://api.upayments.com',
+        'http://api.upayments.comhttp://api.upayments.com',
+        'https://api.upayments.comhttps://api.upayments.com',
+    }
+    if normalized in legacy_live_urls:
+        return 'https://uapi.upayments.com'
+    return base_url
+
+
 def upayments_token(base_url: str) -> str:
     if 'sandboxapi.upayments.com' in base_url.lower():
         return os.environ.get(
@@ -531,7 +545,7 @@ def upayments_token(base_url: str) -> str:
 
 
 def create_upayments_payment(payload: dict) -> dict:
-    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
+    base_url = upayments_base_url()
     token = upayments_token(base_url)
     if not token:
         raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
@@ -802,7 +816,7 @@ def upayments_json_get(url: str, token: str) -> dict:
 
 
 def check_upayments_payment_status(params: dict | str) -> dict:
-    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
+    base_url = upayments_base_url()
     token = upayments_token(base_url)
     if not token:
         raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
