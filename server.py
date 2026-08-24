@@ -523,7 +523,10 @@ def is_valid_payment_url(value: str) -> bool:
 
 def upayments_token(base_url: str) -> str:
     if 'sandboxapi.upayments.com' in base_url.lower():
-        return 'jtest123'
+        return os.environ.get(
+            'UPAYMENTS_SANDBOX_API_KEY',
+            'e66a94d579cf75fba327ff716ad68c53aae11528',
+        ).strip()
     return os.environ.get('UPAYMENTS_API_KEY', '').strip()
 
 
