@@ -1363,6 +1363,31 @@ class AppState extends ChangeNotifier {
     html.window.localStorage.remove('$paymentDraftStoragePrefix$draftId');
   }
 
+  Map<String, dynamic> decodeJsonObjectOrThrow(String text, int status) {
+    if (text.trim().isEmpty) return <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      throw const FormatException('JSON response was not an object.');
+    } on FormatException {
+      final preview = text
+          .replaceAll(
+              RegExp(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>',
+                  caseSensitive: false),
+              ' ')
+          .replaceAll(
+              RegExp(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>',
+                  caseSensitive: false),
+              ' ')
+          .replaceAll(RegExp(r'<[^>]+>'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      throw Exception(preview.isEmpty
+          ? 'Payment server returned HTTP $status with a non-JSON response.'
+          : 'Payment server returned HTTP $status with a non-JSON response: ${preview.substring(0, preview.length > 220 ? 220 : preview.length)}');
+    }
+  }
+
   Future<Map<String, dynamic>> postPaymentJson(
       String path, Map<String, dynamic> payload) async {
     final request = html.HttpRequest();
@@ -1390,9 +1415,7 @@ class AppState extends ChangeNotifier {
     final response = await completer.future;
     final status = response.status ?? 0;
     final text = response.responseText ?? '';
-    final body = text.isEmpty
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(jsonDecode(text) as Map);
+    final body = decodeJsonObjectOrThrow(text, status);
     if (status < 200 || status >= 300) {
       final message = body['error']?.toString();
       throw Exception(message == null || message.isEmpty
