@@ -645,28 +645,44 @@ def create_upayments_payment(payload: dict) -> dict:
         or data.get('track_id')
         or data.get('TrackID')
         or data.get('trackID')
-        or data.get('paymentId')
+        or ''
+    ).strip()
+    payment_id = str(
+        data.get('paymentId')
         or data.get('payment_id')
         or data.get('PaymentID')
         or data.get('paymentID')
-        or data.get('sessionId')
+        or ''
+    ).strip()
+    session_id = str(
+        data.get('sessionId')
         or data.get('session_id')
         or data.get('SessionID')
-        or data.get('invoiceId')
+        or data.get('id')
+        or ''
+    ).strip()
+    invoice_id = str(
+        data.get('invoiceId')
         or data.get('invoice_id')
         or data.get('InvoiceID')
-        or data.get('id')
+        or data.get('encrypted_invoice_id')
         or ''
     ).strip()
     if order_id.upper().startswith('DRAFT-') and isinstance(draft, dict):
         saved_draft = get_payment_draft(order_id) or draft
         saved_draft['paymentTrackId'] = track_id
+        saved_draft['paymentId'] = payment_id
+        saved_draft['paymentSessionId'] = session_id
+        saved_draft['paymentInvoiceId'] = invoice_id
         saved_draft['paymentUrl'] = payment_url
         save_payment_draft(order_id, saved_draft)
     return {
         'provider': 'upayments',
         'paymentUrl': payment_url,
         'trackId': track_id,
+        'paymentId': payment_id,
+        'sessionId': session_id,
+        'invoiceId': invoice_id,
         'amount': amount,
     }
 
@@ -751,9 +767,9 @@ def payment_status_lookup_candidates(base_url: str, params: dict) -> list[str]:
 
     identifiers = {
         'track_id': first_query_value(params, 'track_id', 'trackId', 'trackid', 'TrackID', 'trackID', 'paymentTrackId'),
-        'payment_id': first_query_value(params, 'payment_id', 'paymentId', 'paymentID', 'PaymentID'),
-        'session_id': first_query_value(params, 'session_id', 'sessionId', 'sessionID', 'SessionID'),
-        'invoice_id': first_query_value(params, 'invoice_id', 'invoiceId', 'invoiceID', 'InvoiceID'),
+        'payment_id': first_query_value(params, 'payment_id', 'paymentId', 'paymentID', 'PaymentID', 'paymentIdStored'),
+        'session_id': first_query_value(params, 'session_id', 'sessionId', 'sessionID', 'SessionID', 'paymentSessionId'),
+        'invoice_id': first_query_value(params, 'invoice_id', 'invoiceId', 'invoiceID', 'InvoiceID', 'paymentInvoiceId'),
     }
 
     for key in ('track_id', 'payment_id'):
@@ -876,6 +892,10 @@ def confirm_upayments_payment(payload: dict) -> dict:
     lookup_params = dict(params)
     if not track_id and isinstance(draft, dict):
         lookup_params['paymentTrackId'] = str(draft.get('paymentTrackId', '')).strip()
+    if isinstance(draft, dict):
+        lookup_params['paymentIdStored'] = str(draft.get('paymentId', '')).strip()
+        lookup_params['paymentSessionId'] = str(draft.get('paymentSessionId', '')).strip()
+        lookup_params['paymentInvoiceId'] = str(draft.get('paymentInvoiceId', '')).strip()
 
     status = check_upayments_payment_status(lookup_params)
     if status.get('status') != 'paid':

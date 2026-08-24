@@ -3037,17 +3037,24 @@ class _TrackPageState extends State<TrackPage> {
       final status = await s.confirmPaymentReturn(widget.paymentParams);
       final verified = status['verified'] == true;
       final paymentState = status['status']?.toString().toLowerCase() ?? '';
+      final verificationError = status['error']?.toString() ?? '';
+      final rawStatus = status['rawStatus']?.toString() ?? '';
       final confirmedOrder = status['orderObject'];
       if (!verified || paymentState != 'paid' || confirmedOrder is! Order) {
         if (!mounted) return;
+        final extraDetail = verificationError.isNotEmpty
+            ? ' $verificationError'
+            : rawStatus.isNotEmpty
+                ? ' UPay status: $rawStatus.'
+                : '';
         setState(() {
           paymentSucceeded = false;
           retryDraftId = draftId;
           paymentTitle = s.t('Payment is not confirmed yet.',
               '\u0627\u0644\u062f\u0641\u0639 \u063a\u064a\u0631 \u0645\u0624\u0643\u062f \u062d\u062a\u0649 \u0627\u0644\u0622\u0646.');
           paymentDetail = s.t(
-              'No booking was saved because UPay did not confirm a captured payment.',
-              '\u0644\u0645 \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632 \u0644\u0623\u0646 UPay \u0644\u0645 \u064a\u0624\u0643\u062f \u0639\u0645\u0644\u064a\u0629 \u062f\u0641\u0639 \u0645\u0643\u062a\u0645\u0644\u0629.');
+              'No booking was saved because UPay did not confirm a captured payment.$extraDetail',
+              '\u0644\u0645 \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632 \u0644\u0623\u0646 UPay \u0644\u0645 \u064a\u0624\u0643\u062f \u0639\u0645\u0644\u064a\u0629 \u062f\u0641\u0639 \u0645\u0643\u062a\u0645\u0644\u0629.$extraDetail');
         });
         return;
       }
