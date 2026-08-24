@@ -1363,38 +1363,62 @@ class AppState extends ChangeNotifier {
     html.window.localStorage.remove('$paymentDraftStoragePrefix$draftId');
   }
 
+  Future<Map<String, dynamic>> postPaymentJson(
+      String path, Map<String, dynamic> payload) async {
+    final request = html.HttpRequest();
+    final completer = Completer<html.HttpRequest>();
+    request
+      ..open('POST', apiUrl(path))
+      ..setRequestHeader('Accept', 'application/json')
+      ..setRequestHeader('Content-Type', 'application/json')
+      ..timeout = 45000;
+
+    request.onLoadEnd.first.then((_) {
+      if (!completer.isCompleted) completer.complete(request);
+    });
+    request.onError.first.then((_) {
+      if (!completer.isCompleted) completer.complete(request);
+    });
+    request.onTimeout.first.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(Exception(
+            'Payment server timed out before returning a checkout link.'));
+      }
+    });
+    request.send(jsonEncode(payload));
+
+    final response = await completer.future;
+    final status = response.status ?? 0;
+    final text = response.responseText ?? '';
+    final body = text.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(text) as Map);
+    if (status < 200 || status >= 300) {
+      final message = body['error']?.toString();
+      throw Exception(message == null || message.isEmpty
+          ? 'Payment server returned HTTP $status.'
+          : message);
+    }
+    return body;
+  }
+
   Future<String> createPaymentLinkForDraft({
     required String draftId,
     required Map<String, dynamic> draft,
     required double amount,
     required String method,
   }) async {
-    final response = await html.HttpRequest.request(
-      apiUrl('/api/payments/create'),
-      method: 'POST',
-      sendData: jsonEncode({
-        'orderId': draftId,
-        'customer': draft['customer']?.toString() ?? '',
-        'mobile': draft['mobile']?.toString() ?? '',
-        'service': draft['service']?.toString() ?? '',
-        'amount': amount,
-        'method': method,
-        'language': draft['language']?.toString() ?? (isArabic ? 'ar' : 'en'),
-        'origin': html.window.location.origin,
-        'draft': draft,
-      }),
-      requestHeaders: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-    );
-    final status = response.status ?? 0;
-    final body = response.responseText == null || response.responseText!.isEmpty
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map);
-    if (status < 200 || status >= 300) {
-      throw Exception(body['error']?.toString() ?? 'Payment request failed.');
-    }
+    final body = await postPaymentJson('/api/payments/create', {
+      'orderId': draftId,
+      'customer': draft['customer']?.toString() ?? '',
+      'mobile': draft['mobile']?.toString() ?? '',
+      'service': draft['service']?.toString() ?? '',
+      'amount': amount,
+      'method': method,
+      'language': draft['language']?.toString() ?? (isArabic ? 'ar' : 'en'),
+      'origin': html.window.location.origin,
+      'draft': draft,
+    });
     final url = body['paymentUrl']?.toString() ?? '';
     if (url.isEmpty) throw Exception('Payment URL was not returned.');
     return url;
