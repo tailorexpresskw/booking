@@ -626,10 +626,33 @@ def create_upayments_payment(payload: dict) -> dict:
     payment_url = str(payment_url or '').strip()
     if not is_valid_payment_url(payment_url):
         raise RuntimeError('UPayments did not return a valid payment URL.')
+    track_id = str(
+        data.get('trackId')
+        or data.get('track_id')
+        or data.get('TrackID')
+        or data.get('trackID')
+        or data.get('paymentId')
+        or data.get('payment_id')
+        or data.get('PaymentID')
+        or data.get('paymentID')
+        or data.get('sessionId')
+        or data.get('session_id')
+        or data.get('SessionID')
+        or data.get('invoiceId')
+        or data.get('invoice_id')
+        or data.get('InvoiceID')
+        or data.get('id')
+        or ''
+    ).strip()
+    if order_id.upper().startswith('DRAFT-') and isinstance(draft, dict):
+        saved_draft = get_payment_draft(order_id) or draft
+        saved_draft['paymentTrackId'] = track_id
+        saved_draft['paymentUrl'] = payment_url
+        save_payment_draft(order_id, saved_draft)
     return {
         'provider': 'upayments',
         'paymentUrl': payment_url,
-        'trackId': data.get('trackId'),
+        'trackId': track_id,
         'amount': amount,
     }
 
@@ -682,21 +705,43 @@ def normalize_payment_state(status: str) -> str:
         'expired',
         'void',
         'error',
+        'not captured',
+        'not_captured',
+        'notcaptured',
     }:
         return 'failed'
     return 'pending'
 
 
-def check_upayments_payment_status(track_id: str) -> dict:
-    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
-    token = upayments_token(base_url)
-    if not token:
-        raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
-    if not track_id:
-        return {'verified': False, 'status': 'pending', 'rawStatus': '', 'raw': {}}
+def payment_status_lookup_candidates(base_url: str, params: dict) -> list[str]:
+    candidates: list[str] = []
 
+    def add(url: str) -> None:
+        if url not in candidates:
+            candidates.append(url)
+
+    identifiers = {
+        'track_id': first_query_value(params, 'track_id', 'trackId', 'trackid', 'TrackID', 'trackID', 'paymentTrackId'),
+        'payment_id': first_query_value(params, 'payment_id', 'paymentId', 'paymentID', 'PaymentID'),
+        'session_id': first_query_value(params, 'session_id', 'sessionId', 'sessionID', 'SessionID'),
+        'invoice_id': first_query_value(params, 'invoice_id', 'invoiceId', 'invoiceID', 'InvoiceID'),
+    }
+
+    for key in ('track_id', 'payment_id'):
+        value = identifiers[key]
+        if value:
+            add(f'{base_url}/api/v1/get-payment-status/{urllib.parse.quote(value, safe="")}')
+
+    for key, value in identifiers.items():
+        if value:
+            add(f'{base_url}/api/v1/get-payment-status?{urllib.parse.urlencode({key: value})}')
+
+    return candidates
+
+
+def upayments_json_get(url: str, token: str) -> dict:
     request = urllib.request.Request(
-        f'{base_url}/api/v1/get-payment-status/{urllib.parse.quote(track_id, safe="")}',
+        url,
         headers={
             'Accept': 'application/json',
             'Authorization': f'Bearer {token}',
@@ -704,20 +749,58 @@ def check_upayments_payment_status(track_id: str) -> dict:
         },
         method='GET',
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode('utf-8', errors='replace')
-        raise RuntimeError(f'UPayments status error {exc.code}: {detail}') from exc
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode('utf-8'))
 
-    raw_status = find_payment_status_value(result)
-    status = normalize_payment_state(raw_status)
+
+def check_upayments_payment_status(params: dict | str) -> dict:
+    base_url = os.environ.get('UPAYMENTS_BASE_URL', 'https://sandboxapi.upayments.com').rstrip('/')
+    token = upayments_token(base_url)
+    if not token:
+        raise RuntimeError('Payment API is not configured. Set UPAYMENTS_API_KEY on the server.')
+    if isinstance(params, str):
+        params = {'track_id': params}
+    if not isinstance(params, dict):
+        params = {}
+
+    candidates = payment_status_lookup_candidates(base_url, params)
+    if not candidates:
+        return {'verified': False, 'status': 'pending', 'rawStatus': '', 'raw': {}}
+
+    last_error = ''
+    pending_result: dict | None = None
+    for url in candidates:
+        try:
+            result = upayments_json_get(url, token)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode('utf-8', errors='replace')
+            cleaned = clean_gateway_error(detail) or detail[:300]
+            last_error = f'UPayments status error {exc.code}: {cleaned}'
+            continue
+        except json.JSONDecodeError as exc:
+            last_error = f'UPayments status returned non-JSON: {exc}'
+            continue
+
+        raw_status = find_payment_status_value(result)
+        status = normalize_payment_state(raw_status)
+        response = {
+            'verified': status == 'paid',
+            'status': status,
+            'rawStatus': raw_status,
+            'raw': result,
+        }
+        if status in {'paid', 'failed'}:
+            return response
+        pending_result = response
+
+    if pending_result is not None:
+        return pending_result
     return {
-        'verified': status == 'paid',
-        'status': status,
-        'rawStatus': raw_status,
-        'raw': result,
+        'verified': False,
+        'status': 'pending',
+        'rawStatus': '',
+        'raw': {},
+        'error': last_error or 'Payment status could not be verified.',
     }
 
 
@@ -732,12 +815,28 @@ def confirm_upayments_payment(payload: dict) -> dict:
         'track_id',
         'trackId',
         'trackid',
+        'TrackID',
+        'trackID',
         'payment_id',
         'paymentId',
         'paymentID',
+        'PaymentID',
+        'session_id',
+        'sessionId',
+        'sessionID',
+        'SessionID',
+        'invoice_id',
+        'invoiceId',
+        'invoiceID',
+        'InvoiceID',
     )
 
-    status = check_upayments_payment_status(track_id)
+    draft = get_payment_draft(draft_id) if draft_id else None
+    lookup_params = dict(params)
+    if not track_id and isinstance(draft, dict):
+        lookup_params['paymentTrackId'] = str(draft.get('paymentTrackId', '')).strip()
+
+    status = check_upayments_payment_status(lookup_params)
     if status.get('status') != 'paid':
         return status
 
@@ -760,7 +859,6 @@ def confirm_upayments_payment(payload: dict) -> dict:
     if not draft_id.upper().startswith('DRAFT-'):
         return status
 
-    draft = get_payment_draft(draft_id)
     if draft is None:
         raise RuntimeError('Booking draft was not found. No order was created.')
 
@@ -883,16 +981,8 @@ class TailorHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == '/api/payments/status':
             query = urllib.parse.parse_qs(parsed.query)
-            track_id = (
-                query.get('track_id', [''])[0]
-                or query.get('trackId', [''])[0]
-                or query.get('trackid', [''])[0]
-                or query.get('payment_id', [''])[0]
-                or query.get('paymentId', [''])[0]
-                or query.get('paymentID', [''])[0]
-            )
             try:
-                status = check_upayments_payment_status(track_id)
+                status = check_upayments_payment_status(query)
             except RuntimeError as exc:
                 self._send_json({'error': str(exc), 'verified': False, 'status': 'pending'}, status=502)
             else:
