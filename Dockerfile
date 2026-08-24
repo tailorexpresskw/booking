@@ -31,10 +31,10 @@ FROM python:3.12-slim AS runtime
 WORKDIR /app
 COPY --from=build /app/build/web /app/build/web
 COPY server.py /app/server.py
-COPY data /app/data
 COPY data/seed_orders.json /app/seed_orders.json
 
 ENV PORT=10000
+ENV DATA_DIR=/app/data
 EXPOSE 10000
 
 CMD ["python", "/app/server.py"]

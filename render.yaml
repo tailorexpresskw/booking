@@ -14,6 +14,8 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      - key: DATA_DIR
+        value: /app/data
       - key: UPAYMENTS_API_KEY
         sync: false
       - key: UPAYMENTS_BASE_URL
