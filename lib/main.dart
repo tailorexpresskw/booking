@@ -1870,16 +1870,31 @@ Widget brand({
 }) {
   final markSize = large ? 46.0 : 34.0;
   final textStyle = TextStyle(
-    color: light ? Colors.white : maroon,
+    color: maroon,
     fontWeight: FontWeight.w400,
     fontSize: large ? 26 : (compact ? 17 : 19),
     letterSpacing: large ? .4 : .1,
   );
-  return Row(mainAxisSize: MainAxisSize.min, children: [
-    TailorMark(size: markSize, light: light),
-    SizedBox(width: large ? 14 : 12),
-    Text('Tailor Express', style: textStyle),
-  ]);
+  final logo = Directionality(
+    textDirection: TextDirection.ltr,
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      TailorMark(size: markSize),
+      SizedBox(width: large ? 14 : 12),
+      Text('Tailor Express', style: textStyle),
+    ]),
+  );
+  if (!light) return logo;
+  return Container(
+    padding: EdgeInsets.symmetric(
+      horizontal: large ? 18 : 12,
+      vertical: large ? 12 : 8,
+    ),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: logo,
+  );
 }
 
 class TailorMark extends StatelessWidget {
@@ -1893,11 +1908,11 @@ class TailorMark extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: light ? Colors.white : maroon,
+        color: maroon,
         shape: BoxShape.circle,
       ),
       child: CustomPaint(
-        painter: TailorMarkPainter(color: light ? maroon : Colors.white),
+        painter: const TailorMarkPainter(color: Colors.white),
       ),
     );
   }
