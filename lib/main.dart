@@ -1155,7 +1155,7 @@ class AppState extends ChangeNotifier {
     if (host == '127.0.0.1' || host == 'localhost') {
       return 'http://127.0.0.1:8090$path';
     }
-    return Uri.base.resolve(path).toString();
+    return path;
   }
 
   void _loadOrders() {
@@ -1416,6 +1416,10 @@ class AppState extends ChangeNotifier {
     final status = response.status ?? 0;
     final text = response.responseText ?? '';
     final body = decodeJsonObjectOrThrow(text, status);
+    if (status == 0) {
+      throw Exception(
+          'Cannot reach the booking server. Refresh the page, wait for Render to wake up, then try payment again.');
+    }
     if (status < 200 || status >= 300) {
       final message = body['error']?.toString();
       throw Exception(message == null || message.isEmpty
