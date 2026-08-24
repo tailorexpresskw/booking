@@ -547,6 +547,17 @@ def create_upayments_payment(payload: dict) -> dict:
     language = str(payload.get('language', 'en')).strip().lower()
     if language not in ('en', 'ar'):
         language = 'en'
+    gateway_src = str(payload.get('paymentGatewaySrc', '')).strip()
+    allowed_gateway_sources = {
+        'knet',
+        'cc',
+        'apple-pay-knet',
+        'apple-pay',
+        'google-pay',
+        'samsung-pay',
+    }
+    if gateway_src and gateway_src not in allowed_gateway_sources:
+        raise RuntimeError('Unsupported UPayments payment method.')
     base = app_base_url(payload)
     encoded_order_id = urllib.parse.quote(order_id, safe='')
     mobile = normalize_mobile_for_upayments(str(payload.get('mobile', '')))
@@ -581,6 +592,8 @@ def create_upayments_payment(payload: dict) -> dict:
         'customerExtraData': order_id,
         'paymentLinkExpiryInMinutes': int(os.environ.get('UPAYMENTS_LINK_EXPIRY_MINUTES', '60')),
     }
+    if gateway_src:
+        body['paymentGateway'] = {'src': gateway_src}
 
     request = urllib.request.Request(
         f'{base_url}/api/v1/charge',

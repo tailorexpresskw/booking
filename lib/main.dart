@@ -41,6 +41,19 @@ const ordersStorageKey = 'tailor_express_orders_v1';
 const staffUsersStorageKey = 'tailor_express_staff_users_v1';
 const areaPricesStorageKey = 'tailor_express_area_prices_v1';
 const paymentDraftStoragePrefix = 'tailor_express_payment_draft_';
+const paymentGatewayOptions = <Map<String, String>>[
+  {
+    'src': 'knet',
+    'labelEn': 'KNET',
+    'labelAr': '\u0643\u064a \u0646\u062a',
+  },
+  {
+    'src': 'cc',
+    'labelEn': 'Credit card',
+    'labelAr':
+        '\u0628\u0637\u0627\u0642\u0629 \u0627\u0626\u062a\u0645\u0627\u0646',
+  },
+];
 
 Role? roleFromSlug(String slug) {
   for (final role in Role.values) {
@@ -1434,6 +1447,7 @@ class AppState extends ChangeNotifier {
     required Map<String, dynamic> draft,
     required double amount,
     required String method,
+    String paymentGatewaySrc = '',
   }) async {
     final body = await postPaymentJson('/api/payments/create', {
       'orderId': draftId,
@@ -1442,6 +1456,8 @@ class AppState extends ChangeNotifier {
       'service': draft['service']?.toString() ?? '',
       'amount': amount,
       'method': method,
+      if (paymentGatewaySrc.trim().isNotEmpty)
+        'paymentGatewaySrc': paymentGatewaySrc.trim(),
       'language': draft['language']?.toString() ?? (isArabic ? 'ar' : 'en'),
       'origin': html.window.location.origin,
       'draft': draft,
@@ -2699,64 +2715,94 @@ class _BookingPageState extends State<BookingPage> {
     final s = widget.state;
     final amount = selectedDeliveryPrice;
     final dialogWidth = dialogContentWidth(context, 540);
+    var selectedGatewaySrc = 'knet';
     final proceed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(s.t('UPay checkout',
-            '\u0627\u0644\u062f\u0641\u0639 \u0639\u0628\u0631 UPay')),
-        content: SizedBox(
-          width: dialogWidth,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(s.t(
-                  'You will be redirected to UPay. The booking is saved only after payment succeeds.',
-                  '\u0633\u064a\u062a\u0645 \u062a\u062d\u0648\u064a\u0644\u0643 \u0625\u0644\u0649 UPay. \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632 \u0641\u0642\u0637 \u0628\u0639\u062f \u0646\u062c\u0627\u062d \u0627\u0644\u062f\u0641\u0639.')),
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                    color: const Color(0xFFFFF7E7),
-                    borderRadius: BorderRadius.circular(14)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(s.t('UPay checkout',
+              '\u0627\u0644\u062f\u0641\u0639 \u0639\u0628\u0631 UPay')),
+          content: SizedBox(
+            width: dialogWidth,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(s.t(
+                    'Choose a payment method, then complete payment on UPay. The booking is saved only after payment succeeds.',
+                    '\u0627\u062e\u062a\u0631 \u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u062f\u0641\u0639 \u062b\u0645 \u0623\u0643\u0645\u0644 \u0627\u0644\u062f\u0641\u0639 \u0639\u0628\u0631 UPay. \u064a\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062d\u062c\u0632 \u0641\u0642\u0637 \u0628\u0639\u062f \u0646\u062c\u0627\u062d \u0627\u0644\u062f\u0641\u0639.')),
+                const SizedBox(height: 14),
+                Text(
+                  s.t('Payment method',
+                      '\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u062f\u0641\u0639'),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Text(
-                        s.t('Home service visit',
-                            '\u0632\u064a\u0627\u0631\u0629 \u062e\u062f\u0645\u0629 \u0645\u0646\u0632\u0644\u064a\u0629'),
-                        style: const TextStyle(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    Text(
-                        '${s.t('Area', '\u0627\u0644\u0645\u0646\u0637\u0642\u0629')}: ${area.name(s.isArabic)}'),
-                    const SizedBox(height: 6),
-                    Text(
-                        '${s.t('Visit', '\u0627\u0644\u0632\u064a\u0627\u0631\u0629')}: $selectedVisitWindow'),
-                    const SizedBox(height: 6),
-                    Text(
-                        '${s.t('Amount', '\u0627\u0644\u0645\u0628\u0644\u063a')}: ${money(amount)}'),
+                    for (final option in paymentGatewayOptions)
+                      ChoiceChip(
+                        label: Text(s.isArabic
+                            ? option['labelAr']!
+                            : option['labelEn']!),
+                        selected: selectedGatewaySrc == option['src'],
+                        onSelected: (_) => setDialogState(
+                            () => selectedGatewaySrc = option['src']!),
+                      ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFFFF7E7),
+                      borderRadius: BorderRadius.circular(14)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                          s.t('Home service visit',
+                              '\u0632\u064a\u0627\u0631\u0629 \u062e\u062f\u0645\u0629 \u0645\u0646\u0632\u0644\u064a\u0629'),
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      Text(
+                          '${s.t('Area', '\u0627\u0644\u0645\u0646\u0637\u0642\u0629')}: ${area.name(s.isArabic)}'),
+                      const SizedBox(height: 6),
+                      Text(
+                          '${s.t('Visit', '\u0627\u0644\u0632\u064a\u0627\u0631\u0629')}: $selectedVisitWindow'),
+                      const SizedBox(height: 6),
+                      Text(
+                          '${s.t('Amount', '\u0627\u0644\u0645\u0628\u0644\u063a')}: ${money(amount)}'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(s.t('Back', '\u0631\u062c\u0648\u0639'))),
+            ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(s.t('Continue to UPay',
+                    '\u0627\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0625\u0644\u0649 UPay'))),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(s.t('Back', '\u0631\u062c\u0648\u0639'))),
-          ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text(s.t('Continue to UPay',
-                  '\u0627\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0625\u0644\u0649 UPay'))),
-        ],
       ),
     );
 
     if (proceed != true || !mounted) return;
 
-    const paid = 'UPay';
+    final selectedGateway = paymentGatewayOptions.firstWhere(
+      (option) => option['src'] == selectedGatewaySrc,
+      orElse: () => paymentGatewayOptions.first,
+    );
+    final paid =
+        'UPay - ${s.isArabic ? selectedGateway['labelAr'] : selectedGateway['labelEn']}';
     final draftId = 'DRAFT-${DateTime.now().millisecondsSinceEpoch}';
     final draft = buildPaymentDraft(paid);
     widget.state.savePaymentDraft(draftId, draft);
@@ -2766,6 +2812,7 @@ class _BookingPageState extends State<BookingPage> {
         draft: draft,
         amount: amount,
         method: paid,
+        paymentGatewaySrc: selectedGatewaySrc,
       );
       html.window.location.assign(paymentUrl);
       if (!mounted) return;
