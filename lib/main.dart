@@ -1811,7 +1811,8 @@ class Shell extends StatelessWidget {
                                 notificationButton(context, state),
                               OutlinedButton(
                                   onPressed: state.toggleLang,
-                                  child: Text(state.isArabic ? 'EN' : 'AR')),
+                                  child: Text(
+                                      state.isArabic ? 'EN / AR' : 'AR / EN')),
                               if (role != null && state.signedIn)
                                 ElevatedButton(
                                     onPressed: () {
@@ -2976,12 +2977,6 @@ class _TrackPageState extends State<TrackPage> {
                       '${s.t('Current status', 'الحالة الحالية')}: ${customerStageLabel(order!.stage, s.isArabic)}'),
                   bullet(
                       '${s.t('Payment', 'الدفع')}: ${order!.paymentStatus.toLowerCase() == 'paid' ? s.t('Paid', 'مدفوع') : s.t('Pending', 'معلق')}'),
-                  const SizedBox(height: 18),
-                  Text(s.t('Order progress', 'تقدم الطلب'),
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 10),
-                  for (final step in customerProgressSteps(order!, s.isArabic))
-                    bullet(step),
                 ],
               ),
       ),
