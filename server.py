@@ -522,12 +522,9 @@ def is_valid_payment_url(value: str) -> bool:
 
 
 def upayments_token(base_url: str) -> str:
-    configured = os.environ.get('UPAYMENTS_API_KEY', '').strip()
-    if configured:
-        return configured
     if 'sandboxapi.upayments.com' in base_url.lower():
         return 'jtest123'
-    return ''
+    return os.environ.get('UPAYMENTS_API_KEY', '').strip()
 
 
 def create_upayments_payment(payload: dict) -> dict:
