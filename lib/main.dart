@@ -1240,13 +1240,14 @@ class AppState extends ChangeNotifier {
     final previousById = {for (final order in previous) order.id: order};
     final messages = <String>[];
     final staffName = currentStaffName.toLowerCase();
+    final isAdminOrSupervisor = role == Role.admin ||
+        role == Role.receptionistSupervisor ||
+        role == Role.driverSupervisor;
 
     for (final order in next) {
       final old = previousById[order.id];
       if (old == null) {
-        if (role == Role.admin ||
-            role == Role.employee ||
-            role == Role.receptionistSupervisor) {
+        if (role == Role.admin || role == Role.receptionistSupervisor) {
           messages.add(t('New booking ${order.id} needs branch assignment.',
               'حجز جديد ${order.id} يحتاج تعيين الفرع.'));
         }
@@ -1260,11 +1261,30 @@ class AppState extends ChangeNotifier {
         messages.add(t('${order.id} is ready for driver assignment.',
             '${order.id} جاهز لتعيين السائق.'));
       }
+      if (old.branch.toLowerCase() != order.branch.toLowerCase() &&
+          order.hasBranch &&
+          isAdminOrSupervisor) {
+        messages.add(t('${order.id} was assigned to ${order.branch}.',
+            '${order.id} assigned to ${order.branch}.'));
+      }
+      if (old.receptionist.toLowerCase() != order.receptionist.toLowerCase() &&
+          order.hasReceptionist &&
+          isAdminOrSupervisor) {
+        messages.add(t(
+            '${order.id} was assigned to receptionist ${order.receptionist}.',
+            '${order.id} assigned to receptionist ${order.receptionist}.'));
+      }
       if (old.receptionist.toLowerCase() != order.receptionist.toLowerCase() &&
           order.receptionist.toLowerCase() == staffName &&
           role == Role.receptionist) {
         messages.add(
             t('${order.id} was assigned to you.', 'تم تعيين ${order.id} لك.'));
+      }
+      if (old.driver.toLowerCase() != order.driver.toLowerCase() &&
+          order.hasDriver &&
+          isAdminOrSupervisor) {
+        messages.add(t('${order.id} was assigned to driver ${order.driver}.',
+            '${order.id} assigned to driver ${order.driver}.'));
       }
       if (old.driver.toLowerCase() != order.driver.toLowerCase() &&
           order.driver.toLowerCase() == staffName &&
@@ -1273,10 +1293,21 @@ class AppState extends ChangeNotifier {
             'تم تعيين ${order.id} للتوصيل.'));
       }
       if (old.tailor.toLowerCase() != order.tailor.toLowerCase() &&
+          !isPendingAssignment(order.tailor) &&
+          isAdminOrSupervisor) {
+        messages.add(t('${order.id} was assigned to tailor ${order.tailor}.',
+            '${order.id} assigned to tailor ${order.tailor}.'));
+      }
+      if (old.tailor.toLowerCase() != order.tailor.toLowerCase() &&
           order.tailor.toLowerCase() == staffName &&
           role == Role.tailor) {
         messages.add(t('${order.id} was assigned for tailoring.',
             'تم تعيين ${order.id} للخياطة.'));
+      }
+      if (old.stage != order.stage && isAdminOrSupervisor) {
+        messages.add(t(
+            '${order.id} status changed to ${stageLabel(order.stage, false)}.',
+            '${order.id} status changed to ${stageLabel(order.stage, false)}.'));
       }
     }
 
