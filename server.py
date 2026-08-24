@@ -568,6 +568,7 @@ def create_upayments_payment(payload: dict) -> dict:
             'amount': amount,
         },
         'language': language,
+        'tokens': {},
         'reference': {'id': order_id},
         'customer': {
             'uniqueId': mobile.replace('+', '') or order_id,
@@ -665,6 +666,21 @@ def first_query_value(payload: dict, *keys: str) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return ''
+
+
+def flatten_payment_payload(payload: object, result: dict | None = None) -> dict:
+    if result is None:
+        result = {}
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key not in result:
+                result[key] = value
+            if isinstance(value, (dict, list)):
+                flatten_payment_payload(value, result)
+    elif isinstance(payload, list):
+        for value in payload:
+            flatten_payment_payload(value, result)
+    return result
 
 
 def find_payment_status_value(payload: object) -> str:
@@ -808,8 +824,20 @@ def confirm_upayments_payment(payload: dict) -> dict:
     params = payload.get('params')
     if not isinstance(params, dict):
         params = payload
+    params = flatten_payment_payload(params)
 
-    draft_id = first_query_value(params, 'order', 'orderId', 'reference', 'reference_id')
+    draft_id = first_query_value(
+        params,
+        'order',
+        'orderId',
+        'order_id',
+        'requested_order_id',
+        'requestedOrderId',
+        'reference',
+        'reference_id',
+        'trn_udf',
+        'customerExtraData',
+    )
     track_id = first_query_value(
         params,
         'track_id',
@@ -965,6 +993,20 @@ class TailorHandler(SimpleHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b'{}'
         return json.loads(raw.decode('utf-8') or '{}')
 
+    def _read_payload_body(self) -> dict:
+        length = int(self.headers.get('Content-Length', '0') or '0')
+        raw = self.rfile.read(length) if length else b'{}'
+        text = raw.decode('utf-8', errors='replace')
+        content_type = self.headers.get('Content-Type', '').lower()
+        if 'application/json' in content_type:
+            return json.loads(text or '{}')
+        if 'application/x-www-form-urlencoded' in content_type:
+            return urllib.parse.parse_qs(text, keep_blank_values=True)
+        try:
+            return json.loads(text or '{}')
+        except json.JSONDecodeError:
+            return urllib.parse.parse_qs(text, keep_blank_values=True)
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == '/api/health':
@@ -1033,8 +1075,13 @@ class TailorHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == '/api/payments/webhook':
-            # UPayments sends server-to-server payment updates here.
-            self._send_json({'ok': True})
+            try:
+                payload = self._read_payload_body()
+                payment = confirm_upayments_payment({'params': payload})
+            except Exception as exc:
+                self._send_json({'ok': False, 'error': str(exc)}, status=502)
+            else:
+                self._send_json({'ok': True, **payment})
             return
 
         if parsed.path == '/api/login':
