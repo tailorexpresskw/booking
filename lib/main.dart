@@ -165,8 +165,10 @@ bool isReadyForDriverAssignment(Order order) =>
 
 bool isDelivered(Order order) => order.stage == Stage.delivered;
 
-bool hasConfirmedPayment(Order order) =>
-    order.paymentStatus.toLowerCase() == 'paid';
+bool hasConfirmedPayment(Order order) {
+  final status = order.paymentStatus.trim().toLowerCase();
+  return !{'failed', 'cancelled', 'canceled', 'void'}.contains(status);
+}
 
 class Area {
   const Area(this.en, this.ar);
