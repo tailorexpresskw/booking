@@ -3901,6 +3901,9 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   final driverFilter = TextEditingController();
   Stage? selectedStage;
   String selectedBranch = 'All';
+  String datePreset = 'nearest';
+  DateTime? fromDate;
+  DateTime? toDate;
 
   AppState get state => widget.state;
 
@@ -3937,6 +3940,97 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     return query.isEmpty || value.toLowerCase().contains(query);
   }
 
+  DateTime startOfDay(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  DateTime endOfDay(DateTime value) =>
+      DateTime(value.year, value.month, value.day, 23, 59, 59, 999);
+
+  DateTimeRange? get activeDateRange {
+    final today = startOfDay(DateTime.now());
+    if (datePreset == 'today') {
+      return DateTimeRange(start: today, end: endOfDay(today));
+    }
+    if (datePreset == 'week') {
+      final weekStart = today.subtract(Duration(days: today.weekday % 7));
+      return DateTimeRange(
+        start: weekStart,
+        end: endOfDay(weekStart.add(const Duration(days: 6))),
+      );
+    }
+    if (datePreset == 'custom') {
+      if (fromDate == null && toDate == null) return null;
+      return DateTimeRange(
+        start: startOfDay(fromDate ?? DateTime(2000)),
+        end: endOfDay(toDate ?? DateTime(2100)),
+      );
+    }
+    return null;
+  }
+
+  bool matchesDateFilter(Order order) {
+    final range = activeDateRange;
+    if (range == null) return true;
+    final visit = visitSortDate(order);
+    return !visit.isBefore(range.start) && !visit.isAfter(range.end);
+  }
+
+  String datePresetLabel(String value) {
+    return switch (value) {
+      'today' => state.t('Today', '\u0627\u0644\u064a\u0648\u0645'),
+      'week' => state.t('This week',
+          '\u0647\u0630\u0627 \u0627\u0644\u0623\u0633\u0628\u0648\u0639'),
+      'custom' => state.t('From / To', '\u0645\u0646 / \u0625\u0644\u0649'),
+      _ => state.t('Nearest first',
+          '\u0627\u0644\u0623\u0642\u0631\u0628 \u0623\u0648\u0644\u0627\u064b'),
+    };
+  }
+
+  void setDatePreset(String value) {
+    setState(() {
+      datePreset = value;
+      if (value != 'custom') {
+        fromDate = null;
+        toDate = null;
+      }
+    });
+  }
+
+  Future<void> pickDate({required bool from}) async {
+    final initial = from
+        ? (fromDate ?? DateTime.now())
+        : (toDate ?? fromDate ?? DateTime.now());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2035),
+    );
+    if (picked == null) return;
+    setState(() {
+      datePreset = 'custom';
+      if (from) {
+        fromDate = picked;
+        if (toDate != null && toDate!.isBefore(picked)) toDate = picked;
+      } else {
+        toDate = picked;
+        if (fromDate != null && fromDate!.isAfter(picked)) fromDate = picked;
+      }
+    });
+  }
+
+  Widget dateFilterButton({
+    required String label,
+    required DateTime? value,
+    required VoidCallback onPressed,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.calendar_today_outlined, size: 18),
+      label: Text(value == null ? label : '$label ${formatVisitDate(value)}'),
+    );
+  }
+
   List<Order> get filteredOrders {
     final query = search.text.trim().toLowerCase();
     final branch = selectedBranch.toLowerCase();
@@ -3949,6 +4043,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       if (selectedBranch != 'All' && order.branch.toLowerCase() != branch) {
         return false;
       }
+      if (!matchesDateFilter(order)) return false;
       if (!matchesColumn(order.id, idFilter) ||
           !matchesColumn(order.customer, customerFilter) ||
           !matchesColumn(order.mobile, mobileFilter) ||
@@ -4398,6 +4493,34 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         const SizedBox(height: 12),
         Wrap(spacing: 12, runSpacing: 12, children: [
           SizedBox(
+            width: 210,
+            child: DropdownButtonFormField<String>(
+              value: datePreset,
+              decoration: InputDecoration(
+                labelText: state.t('Date filter',
+                    '\u0641\u0644\u062a\u0631 \u0627\u0644\u062a\u0627\u0631\u064a\u062e'),
+              ),
+              items: [
+                for (final preset in ['nearest', 'today', 'week', 'custom'])
+                  DropdownMenuItem(
+                    value: preset,
+                    child: Text(datePresetLabel(preset)),
+                  ),
+              ],
+              onChanged: (value) => setDatePreset(value ?? 'nearest'),
+            ),
+          ),
+          dateFilterButton(
+            label: state.t('From', '\u0645\u0646'),
+            value: fromDate,
+            onPressed: () => unawaited(pickDate(from: true)),
+          ),
+          dateFilterButton(
+            label: state.t('To', '\u0625\u0644\u0649'),
+            value: toDate,
+            onPressed: () => unawaited(pickDate(from: false)),
+          ),
+          SizedBox(
             width: 220,
             child: DropdownButtonFormField<String>(
               value: branchOptions.contains(selectedBranch)
@@ -4427,6 +4550,9 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               setState(() {
                 selectedStage = null;
                 selectedBranch = 'All';
+                datePreset = 'nearest';
+                fromDate = null;
+                toDate = null;
                 search.clear();
                 for (final controller in columnFilters) {
                   controller.clear();
