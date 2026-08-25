@@ -2452,6 +2452,29 @@ class _BookingPageState extends State<BookingPage> {
   List<String> get availableVisitSlots =>
       widget.state.availableSlotsForDate(visitDate);
 
+  bool isValidKuwaitMobile(String value) =>
+      RegExp(r'^[569]\d{7}$').hasMatch(value.trim());
+
+  String? validateMobile(String? value) {
+    final digits = (value ?? '').trim();
+    if (digits.isEmpty) {
+      return widget.state.t('Required', 'Ù…Ø·Ù„ÙˆØ¨');
+    }
+    if (!RegExp(r'^\d+$').hasMatch(digits)) {
+      return widget.state.t('Use numbers only.',
+          '\u0627\u0633\u062a\u062e\u062f\u0645 \u0623\u0631\u0642\u0627\u0645 \u0641\u0642\u0637.');
+    }
+    if (digits.length != 8) {
+      return widget.state.t('Enter exactly 8 digits.',
+          '\u0623\u062f\u062e\u0644 8 \u0623\u0631\u0642\u0627\u0645 \u0641\u0642\u0637.');
+    }
+    if (!isValidKuwaitMobile(digits)) {
+      return widget.state.t('Enter a valid Kuwait mobile number.',
+          '\u0623\u062f\u062e\u0644 \u0631\u0642\u0645 \u0645\u0648\u0628\u0627\u064a\u0644 \u0643\u0648\u064a\u062a\u064a \u0635\u062d\u064a\u062d.');
+    }
+    return null;
+  }
+
   void ensureAvailableVisitSelection() {
     visitDate = widget.state.nextAvailableVisitDate(visitDate);
     final slots = availableVisitSlots;
@@ -2755,6 +2778,12 @@ class _BookingPageState extends State<BookingPage> {
         child: TextFormField(
           controller: c,
           keyboardType: phone ? TextInputType.phone : TextInputType.text,
+          inputFormatters: phone
+              ? [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(8),
+                ]
+              : null,
           validator: (v) => v == null || v.trim().isEmpty
               ? widget.state.t('Required', 'مطلوب')
               : null,
@@ -2922,6 +2951,13 @@ class _BookingPageState extends State<BookingPage> {
 
   void submit() {
     if (!form.currentState!.validate()) return;
+    if (!isValidKuwaitMobile(mobile.text)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(widget.state.t(
+              'Enter a valid Kuwait mobile number: 8 digits starting with 5, 6, or 9.',
+              '\u0623\u062f\u062e\u0644 \u0631\u0642\u0645 \u0645\u0648\u0628\u0627\u064a\u0644 \u0643\u0648\u064a\u062a\u064a \u0635\u062d\u064a\u062d: 8 \u0623\u0631\u0642\u0627\u0645 \u0648\u064a\u0628\u062f\u0623 \u0628\u0640 5 \u0623\u0648 6 \u0623\u0648 9.'))));
+      return;
+    }
     if (!widget.state.areaIsActive(area.en)) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(widget.state.t('This area is currently unavailable.',
