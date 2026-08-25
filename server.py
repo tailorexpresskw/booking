@@ -1144,7 +1144,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.send_header('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS')
         self.send_header('Cache-Control', 'no-store')
         super().end_headers()
 
@@ -1408,6 +1408,22 @@ class TailorHandler(SimpleHTTPRequestHandler):
         normalize_order(order)
         save_orders(orders)
         self._send_json(order)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        match = re.fullmatch(r'/api/orders/([^/]+)', parsed.path)
+        if not match:
+            self.send_error(404)
+            return
+
+        order_id = unquote(match.group(1))
+        orders = load_orders()
+        next_orders = [item for item in orders if str(item.get('id')) != order_id]
+        if len(next_orders) == len(orders):
+            self._send_json({'error': 'Order not found'}, status=404)
+            return
+        save_orders(next_orders)
+        self._send_json({'ok': True, 'id': order_id})
 
 
 

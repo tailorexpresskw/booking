@@ -2004,6 +2004,28 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> deleteOrder(String id) async {
+    final index = orders.indexWhere((order) => order.id == id);
+    if (index == -1) return;
+    final removed = orders.removeAt(index);
+    _saveOrders();
+    notifyListeners();
+
+    try {
+      final response = await html.HttpRequest.request(
+        apiUrl('/api/orders/$id'),
+        method: 'DELETE',
+        requestHeaders: {'Accept': 'application/json'},
+      );
+      final status = response.status ?? 0;
+      if (status >= 200 && status < 300) return;
+    } catch (_) {}
+
+    orders.insert(index.clamp(0, orders.length).toInt(), removed);
+    _saveOrders();
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _poller?.cancel();
@@ -4011,6 +4033,14 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     return !visit.isBefore(range.start) && !visit.isAfter(range.end);
   }
 
+  bool isTodayVisit(Order order) {
+    final visit = visitSortDate(order);
+    final today = DateTime.now();
+    return visit.year == today.year &&
+        visit.month == today.month &&
+        visit.day == today.day;
+  }
+
   String datePresetLabel(String value) {
     return switch (value) {
       'today' => state.t('Today', '\u0627\u0644\u064a\u0648\u0645'),
@@ -4072,6 +4102,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     final branch = selectedBranch.toLowerCase();
     final orders = widget.orders.where((order) {
       if (!hasConfirmedPayment(order)) return false;
+      if (isClosedOrder(order)) return false;
       if (selectedStage != null &&
           stageRank(order.stage) != stageRank(selectedStage!)) {
         return false;
@@ -4134,6 +4165,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   List<String> get branchOptions {
     final branches = widget.orders
         .where(hasConfirmedPayment)
+        .where((order) => !isClosedOrder(order))
         .map((order) => order.branch.trim())
         .where((branch) => branch.isNotEmpty && !isPendingAssignment(branch))
         .toSet()
@@ -4187,6 +4219,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     final role = state.role;
     return role == Role.admin || role == Role.employee;
   }
+
+  bool get canDeleteOrder => state.role == Role.admin;
 
   List<Stage> get allowedStatusStages {
     final role = state.role;
@@ -4289,6 +4323,37 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     );
   }
 
+  Future<void> deleteOrderFromTable(BuildContext context, Order order) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(state.t('Delete order',
+            '\u062d\u0630\u0641 \u0627\u0644\u0637\u0644\u0628')),
+        content: Text(state.t(
+          'This removes the order from the schedule. This action is for admin only.',
+          '\u0633\u064a\u062a\u0645 \u062d\u0630\u0641 \u0627\u0644\u0637\u0644\u0628 \u0645\u0646 \u0627\u0644\u062c\u062f\u0648\u0644. \u0647\u0630\u0627 \u0627\u0644\u0625\u062c\u0631\u0627\u0621 \u0644\u0644\u0625\u062f\u0627\u0631\u0629 \u0641\u0642\u0637.',
+        )),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(state.t('Cancel', '\u0625\u0644\u063a\u0627\u0621')),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(state.t('Delete', '\u062d\u0630\u0641')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await state.deleteOrder(order.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(state.t('Order deleted.',
+          '\u062a\u0645 \u062d\u0630\u0641 \u0627\u0644\u0637\u0644\u0628.')),
+    ));
+  }
+
   Widget statusMenu(Order order) {
     final statusStages = allowedStatusStages;
     return PopupMenuButton<Stage>(
@@ -4363,6 +4428,11 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             label: state.t('Bill', 'فاتورة'),
             onPressed: () => openInvoicePrint(order, state),
           ),
+          if (canDeleteOrder)
+            compactTableButton(
+              label: state.t('Delete', '\u062d\u0630\u0641'),
+              onPressed: () => deleteOrderFromTable(context, order),
+            ),
         ],
       ),
     );
@@ -4377,6 +4447,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         if (value == 'reschedule') rescheduleOrderFromTable(context, order);
         if (value == 'cancel') cancelOrderFromTable(context, order);
         if (value == 'bill') openInvoicePrint(order, state);
+        if (value == 'delete') deleteOrderFromTable(context, order);
         if (value.startsWith('stage:')) {
           final stage = stageFromKey(value.substring('stage:'.length));
           setStatusFromTable(context, order, stage);
@@ -4413,6 +4484,12 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           value: 'bill',
           child: Text(state.t('Print bill', 'طباعة الفاتورة')),
         ),
+        if (canDeleteOrder)
+          PopupMenuItem(
+            value: 'delete',
+            child: Text(state.t('Delete order',
+                '\u062d\u0630\u0641 \u0627\u0644\u0637\u0644\u0628')),
+          ),
       ],
       child: Container(
         height: 44,
@@ -4449,9 +4526,13 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   }
 
   Widget mobileOrderCard(BuildContext context, Order order,
-      {bool highlighted = false}) {
+      {bool highlighted = false, bool today = false}) {
     return Card(
-      color: highlighted ? blush : null,
+      color: today
+          ? const Color(0xFFFFF3C4)
+          : highlighted
+              ? blush
+              : null,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -4463,7 +4544,10 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               Text(order.id,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: highlighted ? maroon : ink)),
+                      color: (today || highlighted) ? maroon : ink)),
+              if (today)
+                badge(
+                    state.t('Today', '\u0627\u0644\u064a\u0648\u0645'), maroon),
               badge(stageLabel(order.stage, state.isArabic),
                   stageColor(order.stage)),
               badge(
@@ -4495,9 +4579,10 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   Widget build(BuildContext context) {
     final shown = filteredOrders;
     final compact = MediaQuery.of(context).size.width < 760;
-    final visibleOrders = widget.orders.where(hasConfirmedPayment).toList();
-    final activeShown = shown.where((order) => !isClosedOrder(order)).toList();
-    final nearestActiveId = activeShown.isEmpty ? null : activeShown.first.id;
+    final visibleOrders = widget.orders
+        .where((order) => hasConfirmedPayment(order) && !isClosedOrder(order))
+        .toList();
+    final nearestActiveId = shown.isEmpty ? null : shown.first.id;
     final stageFilters = [
       null,
       Stage.newBooking,
@@ -4505,8 +4590,6 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       Stage.onShop,
       Stage.ready,
       Stage.outForDelivery,
-      Stage.delivered,
-      Stage.cancelled,
     ];
     return adminCard(
       context,
@@ -4650,7 +4733,8 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             children: [
               for (final order in shown.take(80)) ...[
                 mobileOrderCard(context, order,
-                    highlighted: order.id == nearestActiveId),
+                    highlighted: order.id == nearestActiveId,
+                    today: isTodayVisit(order)),
                 const SizedBox(height: 12),
               ],
             ],
@@ -4680,21 +4764,33 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               rows: [
                 for (final order in shown.take(120))
                   DataRow(
-                      color: WidgetStateProperty.resolveWith((states) =>
-                          order.id == nearestActiveId ? blush : null),
+                      color: WidgetStateProperty.resolveWith(
+                          (states) => isTodayVisit(order)
+                              ? const Color(0xFFFFF3C4)
+                              : order.id == nearestActiveId
+                                  ? blush
+                                  : null),
                       cells: [
                         textCell(order.id,
                             width: 96,
                             maxLines: 1,
-                            color: order.id == nearestActiveId ? maroon : null,
-                            weight: order.id == nearestActiveId
+                            color: isTodayVisit(order) ||
+                                    order.id == nearestActiveId
+                                ? maroon
+                                : null,
+                            weight: isTodayVisit(order) ||
+                                    order.id == nearestActiveId
                                 ? FontWeight.w800
                                 : null),
                         DataCell(desktopActionMenu(context, order)),
                         textCell(order.window,
                             width: 220,
-                            color: order.id == nearestActiveId ? maroon : null,
-                            weight: order.id == nearestActiveId
+                            color: isTodayVisit(order) ||
+                                    order.id == nearestActiveId
+                                ? maroon
+                                : null,
+                            weight: isTodayVisit(order) ||
+                                    order.id == nearestActiveId
                                 ? FontWeight.w800
                                 : null),
                         textCell(order.customer, width: 170),
