@@ -899,8 +899,10 @@ class AppState extends ChangeNotifier {
     unawaited(refreshAreaPrices());
     unawaited(refreshBookingSchedule(quiet: true));
     unawaited(refreshOrders());
-    _poller = Timer.periodic(const Duration(seconds: 8), (_) {
-      unawaited(refreshOrders(quiet: true));
+    _poller = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (signedIn) {
+        unawaited(refreshOrders(quiet: true));
+      }
     });
   }
 
@@ -2475,7 +2477,7 @@ class _BookingPageState extends State<BookingPage> {
       widget.state.availableSlotsForDate(visitDate);
 
   bool isValidKuwaitMobile(String value) =>
-      RegExp(r'^[569]\d{7}$').hasMatch(value.trim());
+      RegExp(r'^[4569]\d{7}$').hasMatch(value.trim());
 
   String? validateMobile(String? value) {
     final digits = (value ?? '').trim();
@@ -2976,8 +2978,8 @@ class _BookingPageState extends State<BookingPage> {
     if (!isValidKuwaitMobile(mobile.text)) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(widget.state.t(
-              'Enter a valid Kuwait mobile number: 8 digits starting with 5, 6, or 9.',
-              '\u0623\u062f\u062e\u0644 \u0631\u0642\u0645 \u0645\u0648\u0628\u0627\u064a\u0644 \u0643\u0648\u064a\u062a\u064a \u0635\u062d\u064a\u062d: 8 \u0623\u0631\u0642\u0627\u0645 \u0648\u064a\u0628\u062f\u0623 \u0628\u0640 5 \u0623\u0648 6 \u0623\u0648 9.'))));
+              'Enter a valid Kuwait mobile number: 8 digits starting with 4, 5, 6, or 9.',
+              '\u0623\u062f\u062e\u0644 \u0631\u0642\u0645 \u0645\u0648\u0628\u0627\u064a\u0644 \u0643\u0648\u064a\u062a\u064a \u0635\u062d\u064a\u062d: 8 \u0623\u0631\u0642\u0627\u0645 \u0648\u064a\u0628\u062f\u0623 \u0628\u0640 4 \u0623\u0648 5 \u0623\u0648 6 \u0623\u0648 9.'))));
       return;
     }
     if (!widget.state.areaIsActive(area.en)) {

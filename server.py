@@ -604,8 +604,8 @@ def normalize_kuwait_mobile(mobile: str) -> str:
     digits = ''.join(ch for ch in str(mobile) if ch.isdigit())
     if digits.startswith('965') and len(digits) == 11:
         digits = digits[3:]
-    if len(digits) != 8 or not re.fullmatch(r'[569]\d{7}', digits):
-        raise ValueError('Enter a valid Kuwait mobile number: 8 digits starting with 5, 6, or 9.')
+    if len(digits) != 8 or not re.fullmatch(r'[4569]\d{7}', digits):
+        raise ValueError('Enter a valid Kuwait mobile number: 8 digits starting with 4, 5, 6, or 9.')
     return digits
 
 
