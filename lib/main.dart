@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
+import 'dart:js_util' as js_util;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1609,8 +1610,44 @@ class AppState extends ChangeNotifier {
     staffNotificationCount += messages.length;
     staffNotificationText = messages.first;
     if (browserNotificationsEnabled) {
-      html.Notification('Tailor Express', body: staffNotificationText);
+      unawaited(showStaffNotification(staffNotificationText));
     }
+  }
+
+  Future<void> showStaffNotification(String body) async {
+    const icon = '/icons/tailor-logo-192.png';
+    try {
+      final serviceWorker =
+          js_util.getProperty<Object?>(html.window.navigator, 'serviceWorker');
+      final ready = serviceWorker == null
+          ? null
+          : js_util.getProperty<Object?>(serviceWorker, 'ready');
+      if (ready != null) {
+        final registration = await js_util.promiseToFuture<Object>(ready);
+        await js_util.promiseToFuture<Object?>(js_util.callMethod(
+          registration,
+          'showNotification',
+          [
+            'Tailor Express',
+            js_util.jsify({
+              'body': body,
+              'icon': icon,
+              'badge': icon,
+              'tag': 'tailor-express-staff',
+              'renotify': true,
+              'data': {'url': '/staff'},
+            }),
+          ],
+        ));
+        return;
+      }
+    } catch (_) {
+      // Fall back to page notifications below.
+    }
+
+    try {
+      html.Notification('Tailor Express', body: body, icon: icon);
+    } catch (_) {}
   }
 
   Order? byId(String id) {
@@ -6424,6 +6461,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   late final TextEditingController policyArDetailController;
   late final List<PolicyRecord> policies;
   late final List<TextEditingController> capacityControllers;
+  late DateTime scheduleFromDate;
+  late DateTime scheduleToDate;
   final List<String> dayKeys = [
     'Sunday',
     'Monday',
@@ -6466,6 +6505,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
         TextEditingController(text: s.bookingSchedule.slots.join(','));
     dateRangeController =
         TextEditingController(text: '29-07-2026 to 31-07-2026');
+    final existingDates = s.bookingSchedule.rows.keys
+        .map(parseDateKey)
+        .whereType<DateTime>()
+        .toList();
+    existingDates.sort();
+    scheduleFromDate = existingDates.isNotEmpty
+        ? existingDates.first
+        : DateTime.now().add(const Duration(days: 1));
+    scheduleToDate = existingDates.isNotEmpty
+        ? existingDates.last
+        : scheduleFromDate.add(const Duration(days: 2));
     branchSearchController = TextEditingController();
     policies = List<PolicyRecord>.from(adminPolicies);
     policyEnNameController = TextEditingController();
@@ -6636,13 +6686,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           style: const TextStyle(color: Colors.black54)),
                       const SizedBox(height: 12),
                       Wrap(spacing: 12, runSpacing: 12, children: [
-                        SizedBox(
-                            width: 240,
-                            child: TextField(
-                                controller: dateRangeController,
-                                decoration: InputDecoration(
-                                    labelText:
-                                        s.t('Date range', 'نطاق التاريخ')))),
+                        scheduleDateButton(
+                          label: s.t('From', 'من'),
+                          value: scheduleFromDate,
+                          onPressed: () =>
+                              unawaited(pickScheduleDate(from: true)),
+                        ),
+                        scheduleDateButton(
+                          label: s.t('To', 'إلى'),
+                          value: scheduleToDate,
+                          onPressed: () =>
+                              unawaited(pickScheduleDate(from: false)),
+                        ),
                         for (var i = 0; i < slotKeys.length; i++)
                           SizedBox(
                               width: 105,
@@ -6683,11 +6738,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             DataCell(SizedBox(
                                 width: 44,
                                 child: Text('${row.value[slot] ?? 0}'))),
-                          DataCell(compactTableButton(
-                            label: s.t('Deactivate', 'إيقاف'),
-                            onPressed: () =>
-                                unawaited(deactivateScheduleDate(row.key)),
-                          )),
+                          DataCell(Builder(builder: (context) {
+                            final closed =
+                                row.value.values.every((value) => value <= 0);
+                            return compactTableButton(
+                              label: closed
+                                  ? s.t('Open', 'فتح')
+                                  : s.t('Close', 'إغلاق'),
+                              onPressed: () => unawaited(closed
+                                  ? activateScheduleDate(row.key)
+                                  : deactivateScheduleDate(row.key)),
+                            );
+                          })),
                         ]),
                     ],
                   ),
@@ -7221,13 +7283,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return slots.isEmpty ? defaultBookingSlots : slots;
   }
 
+  Future<void> pickScheduleDate({required bool from}) async {
+    final today = DateTime.now();
+    final firstDate = DateTime(today.year, today.month, today.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: from ? scheduleFromDate : scheduleToDate,
+      firstDate: firstDate,
+      lastDate: firstDate.add(const Duration(days: 180)),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (from) {
+        scheduleFromDate = picked;
+        if (scheduleToDate.isBefore(scheduleFromDate)) {
+          scheduleToDate = scheduleFromDate;
+        }
+      } else {
+        scheduleToDate = picked;
+        if (scheduleFromDate.isAfter(scheduleToDate)) {
+          scheduleFromDate = scheduleToDate;
+        }
+      }
+    });
+  }
+
+  Widget scheduleDateButton({
+    required String label,
+    required DateTime value,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: 190,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.calendar_today_outlined, size: 18),
+        label: Text('$label: ${formatVisitDate(value)}'),
+      ),
+    );
+  }
+
   Map<String, Map<String, int>> generatedScheduleRows() {
     final slots = configuredSlots;
-    final today = DateTime.now();
+    final first = DateTime(
+        scheduleFromDate.year, scheduleFromDate.month, scheduleFromDate.day);
+    final last =
+        DateTime(scheduleToDate.year, scheduleToDate.month, scheduleToDate.day);
+    final start = first.isAfter(last) ? last : first;
+    final end = first.isAfter(last) ? first : last;
     final rows = <String, Map<String, int>>{};
-    for (var i = 1; i <= 30; i++) {
-      final day =
-          DateTime(today.year, today.month, today.day).add(Duration(days: i));
+    for (var day = start;
+        !day.isAfter(end);
+        day = day.add(const Duration(days: 1))) {
       if (!workingDays.contains(weekdayName(day))) continue;
       rows[formatVisitDate(day)] = {
         for (var index = 0; index < slots.length; index++)
@@ -7268,6 +7375,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
       rows: rows,
     ));
     notifySaved(s.t('Date deactivated.', 'تم إيقاف التاريخ.'));
+    setState(() {});
+  }
+
+  Future<void> activateScheduleDate(String date) async {
+    final rows = {
+      for (final entry in s.bookingSchedule.rows.entries)
+        entry.key: Map<String, int>.from(entry.value)
+    };
+    rows[date] = {
+      for (final slot in s.bookingSchedule.slots) slot: 1,
+    };
+    await s.updateBookingSchedule(BookingScheduleSettings(
+      enabled: s.bookingSchedule.enabled,
+      slots: s.bookingSchedule.slots,
+      workingDays: s.bookingSchedule.workingDays,
+      rows: rows,
+    ));
+    notifySaved(s.t('Date activated.', 'تم فتح التاريخ.'));
     setState(() {});
   }
 
