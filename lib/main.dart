@@ -607,6 +607,26 @@ DateTime? parseDateKey(String value) {
   );
 }
 
+DateTime? parseVisitDateFromWindow(String value) {
+  final match = RegExp(r'(\d{1,2})-(\d{1,2})-(\d{4})').firstMatch(value);
+  if (match == null) return null;
+  return DateTime(
+    int.parse(match.group(3)!),
+    int.parse(match.group(2)!),
+    int.parse(match.group(1)!),
+  );
+}
+
+String? parseVisitSlotFromWindow(String value, Iterable<String> slots) {
+  for (final slot in slots) {
+    if (slot.isNotEmpty && value.contains(slot)) return slot;
+  }
+  final parts = value.split(',');
+  if (parts.length < 2) return null;
+  final slot = parts.sublist(1).join(',').trim();
+  return slot.isEmpty ? null : slot;
+}
+
 String weekdayName(DateTime value) => switch (value.weekday) {
       DateTime.monday => 'Monday',
       DateTime.tuesday => 'Tuesday',
@@ -1073,6 +1093,9 @@ class AppState extends ChangeNotifier {
     role = null;
     user = '';
     currentStaff = null;
+    staffNotificationCount = 0;
+    staffNotificationText = '';
+    unawaited(updateAppBadge());
     notifyListeners();
   }
 
@@ -1609,9 +1632,30 @@ class AppState extends ChangeNotifier {
     if (messages.isEmpty) return;
     staffNotificationCount += messages.length;
     staffNotificationText = messages.first;
+    unawaited(updateAppBadge());
     if (browserNotificationsEnabled) {
       unawaited(showStaffNotification(staffNotificationText));
     }
+  }
+
+  Future<void> updateAppBadge() async {
+    try {
+      final navigator = html.window.navigator;
+      final method =
+          staffNotificationCount > 0 ? 'setAppBadge' : 'clearAppBadge';
+      if (!js_util.hasProperty(navigator, method)) return;
+      final args =
+          staffNotificationCount > 0 ? [staffNotificationCount] : const [];
+      await js_util.promiseToFuture<Object?>(
+          js_util.callMethod(navigator, method, args));
+    } catch (_) {}
+  }
+
+  void clearStaffNotifications() {
+    staffNotificationCount = 0;
+    staffNotificationText = '';
+    unawaited(updateAppBadge());
+    notifyListeners();
   }
 
   Future<void> showStaffNotification(String body) async {
@@ -1993,6 +2037,7 @@ class AppState extends ChangeNotifier {
     final index = orders.indexWhere((order) => order.id == id);
     if (index == -1) return;
     final original = orders[index];
+    String? remoteError;
     final nextTimeline = timelineNote == null
         ? original.timeline
         : [...original.timeline, timelineNow(timelineNote)];
@@ -2036,7 +2081,17 @@ class AppState extends ChangeNotifier {
         notifyListeners();
         return;
       }
+      if (response.responseText != null && response.responseText!.isNotEmpty) {
+        final decoded = jsonDecode(response.responseText!);
+        if (decoded is Map && decoded['error'] != null) {
+          remoteError = decoded['error'].toString();
+        }
+      }
     } catch (_) {}
+
+    if (remoteError != null) {
+      throw Exception(remoteError);
+    }
 
     orders[index] = local;
     _saveOrders();
@@ -2449,6 +2504,7 @@ Widget notificationButton(BuildContext context, AppState state) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(state.staffNotificationText)),
         );
+        state.clearStaffNotifications();
       }
     },
     icon: Icon(enabled ? Icons.notifications_active : Icons.notifications_none),
@@ -4256,7 +4312,9 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
 
   bool get canCancelOrReschedule {
     final role = state.role;
-    return role == Role.admin || role == Role.employee;
+    return role == Role.admin ||
+        role == Role.employee ||
+        role == Role.receptionistSupervisor;
   }
 
   bool get canDeleteOrder => state.role == Role.admin;
@@ -4278,7 +4336,6 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       Stage.ready,
       Stage.outForDelivery,
       Stage.delivered,
-      Stage.cancelled,
     ];
   }
 
@@ -4342,24 +4399,81 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       label: state.t('Reason', 'السبب'),
     );
     if (reason == null) return;
-    await state.updateOrder(
-      order.id,
-      stage: Stage.cancelled,
-      timelineNote: reason.trim().isEmpty
-          ? 'Order cancelled from dashboard'
-          : 'Order cancelled: ${reason.trim()}',
+    if (!context.mounted) return;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      state: state,
+      title: state.t('Confirm cancellation', 'تأكيد الإلغاء'),
+      message: state.t(
+        'Are you sure you want to cancel ${order.id}? The appointment slot will be released.',
+        'هل تريد إلغاء ${order.id}؟ سيتم فتح موعد الزيارة مرة أخرى.',
+      ),
+      confirmLabel: state.t('Yes, cancel', 'نعم، إلغاء'),
     );
+    if (!confirmed) return;
+    try {
+      await state.updateOrder(
+        order.id,
+        stage: Stage.cancelled,
+        timelineNote: reason.trim().isEmpty
+            ? 'Order cancelled from dashboard'
+            : 'Order cancelled: ${reason.trim()}',
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> restoreOrderFromTable(BuildContext context, Order order) async {
+    final confirmed = await showConfirmActionDialog(
+      context,
+      state: state,
+      title: state.t('Restore order', 'إرجاع الطلب'),
+      message: state.t(
+        'Restore ${order.id} to pending? The same appointment slot must still be available.',
+        'هل تريد إرجاع ${order.id} إلى معلق؟ يجب أن يكون نفس الموعد متاحاً.',
+      ),
+      confirmLabel: state.t('Yes, restore', 'نعم، إرجاع'),
+    );
+    if (!confirmed) return;
+    try {
+      await state.updateOrder(
+        order.id,
+        stage: Stage.newBooking,
+        timelineNote: 'Order restored from cancellation',
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(state.t(
+          'Cannot restore: selected appointment slot is no longer available.',
+          'لا يمكن الإرجاع: موعد الزيارة غير متاح الآن.',
+        )),
+      ));
+    }
   }
 
   Future<void> rescheduleOrderFromTable(
       BuildContext context, Order order) async {
     final nextWindow = await showRescheduleDialog(context, state, order);
     if (nextWindow == null) return;
-    await state.updateOrder(
-      order.id,
-      window: nextWindow,
-      timelineNote: 'Visit rescheduled to $nextWindow',
-    );
+    try {
+      await state.updateOrder(
+        order.id,
+        window: nextWindow,
+        timelineNote: 'Visit rescheduled to $nextWindow',
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(state.t(
+          'Cannot reschedule: selected appointment slot is no longer available.',
+          'لا يمكن تغيير الموعد: الموعد المختار غير متاح الآن.',
+        )),
+      ));
+    }
   }
 
   Future<void> deleteOrderFromTable(BuildContext context, Order order) async {
@@ -4456,6 +4570,11 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               label: state.t('Cancel', 'إلغاء'),
               onPressed: () => cancelOrderFromTable(context, order),
             ),
+          if (canCancelOrReschedule && order.stage == Stage.cancelled)
+            compactTableButton(
+              label: state.t('Restore', '\u0625\u0631\u062c\u0627\u0639'),
+              onPressed: () => restoreOrderFromTable(context, order),
+            ),
           if (allowedStatusStages.contains(Stage.delivered))
             compactTableButton(
               label: state.t('Delivered', 'تم التسليم'),
@@ -4485,6 +4604,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         if (value == 'driver') assignDriverFromTable(context, order);
         if (value == 'reschedule') rescheduleOrderFromTable(context, order);
         if (value == 'cancel') cancelOrderFromTable(context, order);
+        if (value == 'restore') restoreOrderFromTable(context, order);
         if (value == 'bill') openInvoicePrint(order, state);
         if (value == 'delete') deleteOrderFromTable(context, order);
         if (value.startsWith('stage:')) {
@@ -4518,6 +4638,12 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           PopupMenuItem(
             value: 'cancel',
             child: Text(state.t('Cancel order', 'إلغاء الطلب')),
+          ),
+        if (canCancelOrReschedule && order.stage == Stage.cancelled)
+          PopupMenuItem(
+            value: 'restore',
+            child: Text(state.t('Restore order',
+                '\u0625\u0631\u062c\u0627\u0639 \u0627\u0644\u0637\u0644\u0628')),
           ),
         PopupMenuItem(
           value: 'bill',
@@ -5652,18 +5778,66 @@ Future<String?> showTextEntryDialog(
   return result;
 }
 
+Future<bool> showConfirmActionDialog(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String confirmLabel,
+  required AppState state,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: Text(state.t('No', 'لا')),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: Text(confirmLabel),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
+}
+
 Future<String?> showRescheduleDialog(
   BuildContext context,
   AppState state,
   Order order,
 ) async {
-  var selectedDate = state.nextAvailableVisitDate(
-    parseDateKey(order.window) ?? DateTime.now(),
+  final currentDate = parseVisitDateFromWindow(order.window);
+  final currentSlot = parseVisitSlotFromWindow(
+    order.window,
+    state.bookingSchedule.slots,
   );
-  var slots = state.availableSlotsForDate(selectedDate);
-  var selectedSlot = slots.contains(order.window)
-      ? order.window
-      : (slots.isEmpty ? '' : slots.first);
+  final today = DateTime.now();
+  final canUseCurrentDate = currentDate != null &&
+      currentSlot != null &&
+      !currentDate.isBefore(DateTime(today.year, today.month, today.day));
+  var selectedDate = canUseCurrentDate
+      ? currentDate!
+      : state.nextAvailableVisitDate(DateTime.now());
+
+  List<String> slotsForSelectedDate() {
+    final available = state.availableSlotsForDate(selectedDate).toList();
+    if (currentDate != null &&
+        currentSlot != null &&
+        formatVisitDate(currentDate) == formatVisitDate(selectedDate) &&
+        !available.contains(currentSlot)) {
+      available.insert(0, currentSlot);
+    }
+    return available;
+  }
+
+  var slots = slotsForSelectedDate();
+  var selectedSlot =
+      currentSlot != null && slots.contains(currentSlot) ? currentSlot : null;
+  selectedSlot ??= slots.isEmpty ? '' : slots.first;
 
   return showDialog<String>(
     context: context,
@@ -5684,12 +5858,17 @@ Future<String?> showRescheduleDialog(
                   initialDate: selectedDate,
                   firstDate: DateTime.now(),
                   lastDate: DateTime.now().add(const Duration(days: 45)),
-                  selectableDayPredicate: state.isVisitDateAvailable,
+                  selectableDayPredicate: (date) =>
+                      canUseCurrentDate &&
+                              formatVisitDate(date) ==
+                                  formatVisitDate(currentDate!)
+                          ? true
+                          : state.isVisitDateAvailable(date),
                 );
                 if (picked == null) return;
                 setDialogState(() {
                   selectedDate = picked;
-                  slots = state.availableSlotsForDate(selectedDate);
+                  slots = slotsForSelectedDate();
                   selectedSlot = slots.isEmpty ? '' : slots.first;
                 });
               },

@@ -312,6 +312,49 @@ def save_booking_schedule(payload: dict) -> dict:
     return normalized
 
 
+def parse_visit_window(window: str, slots: list[str] | None = None) -> tuple[str, str] | None:
+    date_match = re.search(r'(\d{1,2}-\d{1,2}-\d{4})', window or '')
+    if date_match is None:
+        return None
+    date_key = date_match.group(1)
+    schedule_slots = slots or load_booking_schedule().get('slots', [])
+    for slot in schedule_slots:
+        if slot and slot in window:
+            return date_key, slot
+    parts = [part.strip() for part in (window or '').split(',', 1)]
+    if len(parts) == 2 and parts[1]:
+        return date_key, parts[1]
+    return None
+
+
+def order_reserves_schedule(order: dict) -> bool:
+    payment_status = str(order.get('paymentStatus', '')).strip().lower()
+    stage = str(order.get('stage', '')).strip().lower()
+    return payment_status not in {'failed', 'cancelled', 'canceled', 'void'} and stage != 'cancelled'
+
+
+def adjust_schedule_capacity(window: str, delta: int) -> None:
+    parsed = parse_visit_window(window)
+    if parsed is None:
+        return
+    date_key, slot = parsed
+    schedule = load_booking_schedule()
+    rows = schedule.setdefault('rows', {})
+    day = rows.get(date_key)
+    if not isinstance(day, dict) or slot not in day:
+        if delta < 0:
+            raise ValueError('Selected appointment is not available.')
+        return
+    try:
+        current = int(day.get(slot, 0))
+    except (TypeError, ValueError):
+        current = 0
+    if delta < 0 and current <= 0:
+        raise ValueError('Selected appointment is no longer available.')
+    day[slot] = max(0, current + delta)
+    save_booking_schedule(schedule)
+
+
 def load_area_prices() -> list[dict]:
     ensure_storage()
     with STORE_LOCK:
@@ -1064,6 +1107,7 @@ def confirm_upayments_payment(payload: dict) -> dict:
 
     try:
         order = build_order({**draft, 'paymentStatus': 'paid', 'paymentDraftId': draft_id}, orders)
+        adjust_schedule_capacity(str(order.get('window', '')), -1)
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
     orders.insert(0, order)
@@ -1320,6 +1364,12 @@ class TailorHandler(SimpleHTTPRequestHandler):
         except ValueError as exc:
             self._send_json({'error': str(exc)}, status=400)
             return
+        try:
+            if order_reserves_schedule(order):
+                adjust_schedule_capacity(str(order.get('window', '')), -1)
+        except ValueError as exc:
+            self._send_json({'error': str(exc)}, status=409)
+            return
         orders.insert(0, order)
         save_orders(orders)
         self._send_json(order, status=201)
@@ -1380,6 +1430,9 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if order is None:
             self._send_json({'error': 'Order not found'}, status=404)
             return
+        original = dict(order)
+        old_active = order_reserves_schedule(original)
+        old_window = str(original.get('window', ''))
 
         allowed = {
             'branch',
@@ -1397,6 +1450,27 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 fallback = 'Pending assignment' if key in {'branch', 'receptionist', 'driver', 'tailor'} else ''
                 order[key] = str(payload.get(key, '')).strip() or fallback
 
+        normalize_order(order)
+        new_active = order_reserves_schedule(order)
+        new_window = str(order.get('window', ''))
+        released_old_slot = False
+        try:
+            if old_active and (not new_active or old_window != new_window):
+                adjust_schedule_capacity(old_window, 1)
+                released_old_slot = True
+            if new_active and (not old_active or old_window != new_window):
+                adjust_schedule_capacity(new_window, -1)
+        except ValueError as exc:
+            if released_old_slot:
+                try:
+                    adjust_schedule_capacity(old_window, -1)
+                except ValueError:
+                    pass
+            order.clear()
+            order.update(original)
+            self._send_json({'error': str(exc)}, status=409)
+            return
+
         note = str(payload.get('timelineNote', '')).strip()
         if note:
             timeline = order.setdefault('timeline', [])
@@ -1405,7 +1479,6 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 order['timeline'] = timeline
             timeline.append(f'{timestamp()} - {note}')
 
-        normalize_order(order)
         save_orders(orders)
         self._send_json(order)
 
@@ -1418,10 +1491,13 @@ class TailorHandler(SimpleHTTPRequestHandler):
 
         order_id = unquote(match.group(1))
         orders = load_orders()
+        order = next((item for item in orders if str(item.get('id')) == order_id), None)
         next_orders = [item for item in orders if str(item.get('id')) != order_id]
         if len(next_orders) == len(orders):
             self._send_json({'error': 'Order not found'}, status=404)
             return
+        if order is not None and order_reserves_schedule(order):
+            adjust_schedule_capacity(str(order.get('window', '')), 1)
         save_orders(next_orders)
         self._send_json({'ok': True, 'id': order_id})
 
