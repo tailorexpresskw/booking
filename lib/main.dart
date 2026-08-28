@@ -41,6 +41,7 @@ enum Stage {
 
 const ordersStorageKey = 'tailor_express_orders_v1';
 const staffUsersStorageKey = 'tailor_express_staff_users_v1';
+const staffSessionStorageKey = 'tailor_express_staff_session_v1';
 const areaPricesStorageKey = 'tailor_express_area_prices_v1';
 const bookingScheduleStorageKey = 'tailor_express_booking_schedule_v1';
 const paymentDraftStoragePrefix = 'tailor_express_payment_draft_';
@@ -913,6 +914,7 @@ const seedOrders = <Order>[
 class AppState extends ChangeNotifier {
   AppState() {
     _loadStaffUsers();
+    _restoreStaffSession();
     _loadAreaPrices();
     _loadBookingSchedule();
     _loadOrders();
@@ -950,6 +952,50 @@ class AppState extends ChangeNotifier {
   TextDirection get dir => isArabic ? TextDirection.rtl : TextDirection.ltr;
   bool get signedIn => role != null;
   bool get browserNotificationsEnabled => notificationPermission == 'granted';
+
+  void _setCurrentStaff(StaffUser staff, {bool persist = true}) {
+    currentStaff = staff;
+    role = staff.role;
+    user = staff.displayName;
+    if (persist) {
+      html.window.localStorage[staffSessionStorageKey] = staff.username;
+    }
+  }
+
+  void _clearStaffSession() {
+    html.window.localStorage.remove(staffSessionStorageKey);
+  }
+
+  void _restoreStaffSession() {
+    final username =
+        html.window.localStorage[staffSessionStorageKey]?.trim().toLowerCase();
+    if (username == null || username.isEmpty) return;
+    for (final staff in staffUsers) {
+      if (staff.active && staff.username.toLowerCase() == username) {
+        _setCurrentStaff(staff, persist: false);
+        return;
+      }
+    }
+    _clearStaffSession();
+  }
+
+  void _syncCurrentStaffFromUsers() {
+    final username = currentStaff?.username.toLowerCase();
+    if (username == null || username.isEmpty) return;
+    for (final staff in staffUsers) {
+      if (staff.active && staff.username.toLowerCase() == username) {
+        _setCurrentStaff(staff);
+        return;
+      }
+    }
+    role = null;
+    user = '';
+    currentStaff = null;
+    staffNotificationCount = 0;
+    staffNotificationText = '';
+    _clearStaffSession();
+    unawaited(updateAppBadge());
+  }
 
   Future<void> enableBrowserNotifications() async {
     try {
@@ -1037,6 +1083,7 @@ class AppState extends ChangeNotifier {
             .whereType<StaffUser>());
       if (staffUsers.isEmpty) staffUsers.addAll(defaultStaffUsers);
       _saveStaffUsers();
+      _syncCurrentStaffFromUsers();
       notifyListeners();
     } catch (_) {}
   }
@@ -1060,9 +1107,7 @@ class AppState extends ChangeNotifier {
         if (remoteUser is Map) {
           final matched =
               StaffUser.fromJson(Map<String, dynamic>.from(remoteUser));
-          currentStaff = matched;
-          role = matched.role;
-          user = matched.displayName;
+          _setCurrentStaff(matched);
           notifyListeners();
           unawaited(refreshStaffUsers());
           return true;
@@ -1081,9 +1126,7 @@ class AppState extends ChangeNotifier {
         }
       }
       if (matched == null) return false;
-      currentStaff = matched;
-      role = matched.role;
-      user = matched.displayName;
+      _setCurrentStaff(matched);
       notifyListeners();
       return true;
     }
@@ -1095,6 +1138,7 @@ class AppState extends ChangeNotifier {
     currentStaff = null;
     staffNotificationCount = 0;
     staffNotificationText = '';
+    _clearStaffSession();
     unawaited(updateAppBadge());
     notifyListeners();
   }
