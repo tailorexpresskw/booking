@@ -5835,9 +5835,9 @@ Future<String?> showRescheduleDialog(
   }
 
   var slots = slotsForSelectedDate();
-  var selectedSlot =
-      currentSlot != null && slots.contains(currentSlot) ? currentSlot : null;
-  selectedSlot ??= slots.isEmpty ? '' : slots.first;
+  var selectedSlot = currentSlot != null && slots.contains(currentSlot)
+      ? currentSlot
+      : (slots.isEmpty ? '' : slots.first);
 
   return showDialog<String>(
     context: context,
