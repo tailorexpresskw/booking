@@ -1900,6 +1900,7 @@ class AppState extends ChangeNotifier {
       sendData: jsonEncode({
         'params': params,
         'orderId': params['order'] ?? '',
+        'source': params['source'] ?? 'return',
       }),
       requestHeaders: {
         'Accept': 'application/json',
@@ -2295,6 +2296,27 @@ class TailorWebApp extends StatelessWidget {
           initialId: uri.queryParameters['order'],
           paymentResult: uri.queryParameters['payment'],
           paymentParams: uri.queryParameters);
+    }
+    if (path.startsWith('/payment/return/') ||
+        path.startsWith('/payment/cancel/')) {
+      state.ensurePublicDefaultArabic();
+      final segments = uri.pathSegments;
+      final result =
+          segments.length > 1 && segments[1] == 'return' ? 'return' : 'failed';
+      final draftId = segments.length > 2 ? segments[2] : '';
+      final returnToken = segments.length > 3 ? segments[3] : '';
+      final params = <String, String>{
+        ...uri.queryParameters,
+        'order': draftId,
+        'payment': result,
+        'source': 'return',
+        if (returnToken.isNotEmpty) 'returnToken': returnToken,
+      };
+      return TrackPage(
+          state: state,
+          initialId: draftId,
+          paymentResult: result,
+          paymentParams: params);
     }
     if (path == '/staff') {
       state.enterStaffArea();
@@ -5864,7 +5886,7 @@ Future<String?> showRescheduleDialog(
       currentSlot != null &&
       !currentDate.isBefore(DateTime(today.year, today.month, today.day));
   var selectedDate = canUseCurrentDate
-      ? currentDate!
+      ? currentDate
       : state.nextAvailableVisitDate(DateTime.now());
 
   List<String> slotsForSelectedDate() {
@@ -5905,7 +5927,7 @@ Future<String?> showRescheduleDialog(
                   selectableDayPredicate: (date) =>
                       canUseCurrentDate &&
                               formatVisitDate(date) ==
-                                  formatVisitDate(currentDate!)
+                                  formatVisitDate(currentDate)
                           ? true
                           : state.isVisitDateAvailable(date),
                 );
@@ -6959,8 +6981,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               parseDateKey(row.key) ?? DateTime.now())))),
                           for (final slot in s.bookingSchedule.slots)
                             DataCell(SizedBox(
-                                width: 44,
-                                child: Text('${row.value[slot] ?? 0}'))),
+                              width: 72,
+                              child: TextFormField(
+                                initialValue: '${row.value[slot] ?? 0}',
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly
+                                ],
+                                textAlign: TextAlign.center,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 8),
+                                ),
+                                onChanged: (value) =>
+                                    updateExistingScheduleCapacity(
+                                        row.key, slot, value),
+                              ),
+                            )),
                           DataCell(Builder(builder: (context) {
                             final closed =
                                 row.value.values.every((value) => value <= 0);
@@ -7569,6 +7607,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
       };
     }
     return rows;
+  }
+
+  void updateExistingScheduleCapacity(String date, String slot, String value) {
+    final parsed = int.tryParse(value.trim()) ?? 0;
+    final rows = {
+      for (final entry in s.bookingSchedule.rows.entries)
+        entry.key: Map<String, int>.from(entry.value)
+    };
+    rows.putIfAbsent(date, () => <String, int>{});
+    rows[date]![slot] = parsed.clamp(0, 999).toInt();
+    s.bookingSchedule = BookingScheduleSettings(
+      enabled: appointmentEnabled,
+      slots: s.bookingSchedule.slots,
+      workingDays: workingDays.toSet(),
+      rows: rows,
+    );
   }
 
   Future<void> saveBookingSchedule({bool regenerate = false}) async {

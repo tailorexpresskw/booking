@@ -2,6 +2,7 @@ import json
 import html
 import os
 import re
+import secrets
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
@@ -741,6 +742,15 @@ def create_upayments_payment(payload: dict) -> dict:
         raise RuntimeError('Unsupported UPayments payment method.')
     base = app_base_url(payload)
     encoded_order_id = urllib.parse.quote(order_id, safe='')
+    return_token = ''
+    if order_id.upper().startswith('DRAFT-') and isinstance(draft, dict):
+        saved_draft = get_payment_draft(order_id) or draft
+        return_token = str(saved_draft.get('paymentReturnToken', '')).strip()
+        if not return_token:
+            return_token = secrets.token_urlsafe(18)
+        saved_draft['paymentReturnToken'] = return_token
+        save_payment_draft(order_id, saved_draft)
+    encoded_return_token = urllib.parse.quote(return_token, safe='')
     mobile_digits = normalize_kuwait_mobile(str(payload.get('mobile', '')))
     mobile = normalize_mobile_for_upayments(mobile_digits)
 
@@ -768,8 +778,12 @@ def create_upayments_payment(payload: dict) -> dict:
             'name': customer_name,
             'mobile': mobile,
         },
-        'returnUrl': f'{base}/track?order={encoded_order_id}&payment=return',
-        'cancelUrl': f'{base}/track?order={encoded_order_id}&payment=failed',
+        'returnUrl': f'{base}/payment/return/{encoded_order_id}/{encoded_return_token}'
+        if return_token
+        else f'{base}/track?order={encoded_order_id}&payment=return',
+        'cancelUrl': f'{base}/payment/cancel/{encoded_order_id}/{encoded_return_token}'
+        if return_token
+        else f'{base}/track?order={encoded_order_id}&payment=failed',
         'notificationUrl': f'{base}/api/payments/webhook',
         'customerExtraData': order_id,
         'paymentLinkExpiryInMinutes': int(os.environ.get('UPAYMENTS_LINK_EXPIRY_MINUTES', '60')),
@@ -822,11 +836,21 @@ def create_upayments_payment(payload: dict) -> dict:
     payment_url = str(payment_url or '').strip()
     if not is_valid_payment_url(payment_url):
         raise RuntimeError('UPayments did not return a valid payment URL.')
+    payment_url_query = urllib.parse.parse_qs(urllib.parse.urlparse(payment_url).query)
+
+    def first_payment_url_value(*keys: str) -> str:
+        for key in keys:
+            value = payment_url_query.get(key)
+            if value:
+                return str(value[0]).strip()
+        return ''
+
     track_id = str(
         data.get('trackId')
         or data.get('track_id')
         or data.get('TrackID')
         or data.get('trackID')
+        or first_payment_url_value('track_id', 'trackId', 'trackid')
         or ''
     ).strip()
     payment_id = str(
@@ -834,6 +858,7 @@ def create_upayments_payment(payload: dict) -> dict:
         or data.get('payment_id')
         or data.get('PaymentID')
         or data.get('paymentID')
+        or first_payment_url_value('payment_id', 'paymentId', 'paymentid')
         or ''
     ).strip()
     session_id = str(
@@ -841,6 +866,7 @@ def create_upayments_payment(payload: dict) -> dict:
         or data.get('session_id')
         or data.get('SessionID')
         or data.get('id')
+        or first_payment_url_value('session_id', 'sessionId', 'sessionId')
         or ''
     ).strip()
     invoice_id = str(
@@ -921,7 +947,17 @@ def find_payment_status_value(payload: object) -> str:
 
 def normalize_payment_state(status: str) -> str:
     normalized = status.strip().lower()
-    if normalized in {'captured', 'paid', 'success', 'succeeded', 'approved'}:
+    if normalized in {
+        'captured',
+        'paid',
+        'success',
+        'succeeded',
+        'approved',
+        'authorized',
+        'transaction approved',
+        'payment success',
+        'payment successful',
+    }:
         return 'paid'
     if normalized in {
         'failed',
@@ -938,6 +974,44 @@ def normalize_payment_state(status: str) -> str:
     }:
         return 'failed'
     return 'pending'
+
+
+def payment_payload_has_identifier(params: dict) -> bool:
+    return bool(first_query_value(
+        params,
+        'track_id',
+        'trackId',
+        'trackid',
+        'TrackID',
+        'payment_id',
+        'paymentId',
+        'PaymentID',
+        'session_id',
+        'sessionId',
+        'SessionID',
+        'invoice_id',
+        'invoiceId',
+        'InvoiceID',
+    ))
+
+
+def payment_payload_indicates_paid(params: dict) -> tuple[bool, str]:
+    values = [
+        first_query_value(params, 'result', 'Result', 'payment_status', 'paymentStatus', 'status'),
+        first_query_value(params, 'response_message', 'responseMessage', 'message'),
+    ]
+    for value in values:
+        if normalize_payment_state(value) == 'paid':
+            return True, value
+    return False, ''
+
+
+def valid_payment_return_token(params: dict, draft: dict | None) -> bool:
+    if not isinstance(draft, dict):
+        return False
+    expected = str(draft.get('paymentReturnToken', '')).strip()
+    supplied = first_query_value(params, 'returnToken', 'return_token')
+    return bool(expected and supplied and secrets.compare_digest(expected, supplied))
 
 
 def payment_status_lookup_candidates(base_url: str, params: dict) -> list[str]:
@@ -1036,6 +1110,7 @@ def confirm_upayments_payment(payload: dict) -> dict:
     if not isinstance(params, dict):
         params = payload
     params = flatten_payment_payload(params)
+    source = str(payload.get('source') or first_query_value(params, 'source')).strip().lower()
 
     draft_id = first_query_value(
         params,
@@ -1080,6 +1155,24 @@ def confirm_upayments_payment(payload: dict) -> dict:
         lookup_params['paymentInvoiceId'] = str(draft.get('paymentInvoiceId', '')).strip()
 
     status = check_upayments_payment_status(lookup_params)
+    redirect_paid, redirect_raw_status = payment_payload_indicates_paid(params)
+    can_trust_paid_payload = (
+        redirect_paid
+        and payment_payload_has_identifier(params)
+        and (
+            source == 'webhook'
+            or valid_payment_return_token(params, draft)
+        )
+    )
+    if status.get('status') != 'paid' and can_trust_paid_payload:
+        status = {
+            'verified': True,
+            'status': 'paid',
+            'rawStatus': redirect_raw_status or 'CAPTURED',
+            'raw': params,
+            'source': source or 'return',
+            'verificationFallback': 'captured_return_payload',
+        }
     if status.get('status') != 'paid':
         return status
 
@@ -1298,7 +1391,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/payments/webhook':
             try:
                 payload = self._read_payload_body()
-                payment = confirm_upayments_payment({'params': payload})
+                payment = confirm_upayments_payment({'params': payload, 'source': 'webhook'})
             except Exception as exc:
                 self._send_json({'ok': False, 'error': str(exc)}, status=502)
             else:
