@@ -973,6 +973,7 @@ class AppState extends ChangeNotifier {
   String notificationPermission = html.Notification.permission ?? 'default';
   int staffNotificationCount = 0;
   String staffNotificationText = '';
+  final Set<String> _browserNotifiedAttentionKeys = {};
 
   String t(String en, String ar) => isArabic ? ar : en;
   TextDirection get dir => isArabic ? TextDirection.rtl : TextDirection.ltr;
@@ -1613,25 +1614,31 @@ class AppState extends ChangeNotifier {
         requestHeaders: {'Accept': 'application/json'},
       );
       final remote = _decodeOrders(response.responseText);
-      if (remote == null || _sameOrders(remote)) return;
+      if (remote == null) return;
+      if (_sameOrders(remote)) {
+        final attentionChanged = _syncStaffAttention(remote, alertNew: quiet);
+        if (attentionChanged) notifyListeners();
+        return;
+      }
       final previous = List<Order>.from(orders);
       orders
         ..clear()
         ..addAll(remote);
       _saveOrders();
-      _notifyStaffChanges(previous, remote, quiet: quiet);
+      final notified = _notifyStaffChanges(previous, remote, quiet: quiet);
+      _syncStaffAttention(remote, alertNew: quiet && !notified);
       notifyListeners();
     } catch (_) {
       if (!quiet) notifyListeners();
     }
   }
 
-  void _notifyStaffChanges(
+  bool _notifyStaffChanges(
     List<Order> previous,
     List<Order> next, {
     required bool quiet,
   }) {
-    if (!quiet || !signedIn) return;
+    if (!quiet || !signedIn) return false;
     final previousById = {for (final order in previous) order.id: order};
     final messages = <String>[];
     final staffName = currentStaffName.toLowerCase();
@@ -1706,13 +1713,99 @@ class AppState extends ChangeNotifier {
       }
     }
 
-    if (messages.isEmpty) return;
-    staffNotificationCount += messages.length;
+    if (messages.isEmpty) return false;
     staffNotificationText = messages.first;
     unawaited(updateAppBadge());
     if (browserNotificationsEnabled) {
       unawaited(showStaffNotification(staffNotificationText));
     }
+    return true;
+  }
+
+  Map<String, String> _staffAttentionMessages(List<Order> source) {
+    if (!signedIn) return const {};
+    final currentRole = role;
+    if (currentRole == null) return const {};
+    final staffName = currentStaffName.toLowerCase();
+    final messages = <String, String>{};
+    for (final order in source) {
+      if (!hasConfirmedPayment(order) || isClosedOrder(order)) continue;
+      switch (currentRole) {
+        case Role.admin:
+          if (!order.hasBranch) {
+            messages['${order.id}:branch'] = t(
+                'New booking ${order.id} needs branch assignment.',
+                'حجز جديد ${order.id} يحتاج تعيين الفرع.');
+          } else if (!order.hasDriver) {
+            messages['${order.id}:driver'] = t(
+                '${order.id} has a branch and needs driver follow-up.',
+                '${order.id} يحتاج متابعة السائق بعد تعيين الفرع.');
+          }
+          break;
+        case Role.receptionistSupervisor:
+          if (!order.hasBranch) {
+            messages['${order.id}:branch'] = t(
+                'New booking ${order.id} needs branch assignment.',
+                'حجز جديد ${order.id} يحتاج تعيين الفرع.');
+          }
+          break;
+        case Role.driverSupervisor:
+          if (order.hasBranch && !order.hasDriver) {
+            messages['${order.id}:driver'] = t(
+                '${order.id} was assigned to ${order.branch} and needs driver follow-up.',
+                '${order.id} تم تعيينه إلى ${order.branch} ويحتاج متابعة السائق.');
+          }
+          break;
+        case Role.receptionist:
+          if (order.receptionist.toLowerCase() == staffName &&
+              stageRank(order.stage) < stageRank(Stage.ready)) {
+            messages['${order.id}:receptionist'] =
+                t('${order.id} is assigned to you.', '${order.id} معين لك.');
+          }
+          break;
+        case Role.driver:
+          if (order.driver.toLowerCase() == staffName &&
+              stageRank(order.stage) < stageRank(Stage.delivered)) {
+            messages['${order.id}:driver-user'] = t(
+                '${order.id} is assigned for delivery.',
+                '${order.id} معين للتوصيل.');
+          }
+          break;
+        case Role.tailor:
+          if (order.tailor.toLowerCase() == staffName &&
+              stageRank(order.stage) < stageRank(Stage.ready)) {
+            messages['${order.id}:tailor'] =
+                t('${order.id} is assigned to you.', '${order.id} معين لك.');
+          }
+          break;
+        case Role.employee:
+          break;
+      }
+    }
+    return messages;
+  }
+
+  bool _syncStaffAttention(List<Order> source, {required bool alertNew}) {
+    if (!signedIn) return false;
+    final attention = _staffAttentionMessages(source);
+    final nextKeys = attention.keys.toSet();
+    final newKeys = nextKeys
+        .where((key) => !_browserNotifiedAttentionKeys.contains(key))
+        .toList();
+    _browserNotifiedAttentionKeys
+      ..clear()
+      ..addAll(nextKeys);
+    final nextCount = attention.length;
+    final nextText = attention.values.isEmpty ? '' : attention.values.first;
+    final changed = staffNotificationCount != nextCount ||
+        staffNotificationText != nextText;
+    staffNotificationCount = nextCount;
+    staffNotificationText = nextText;
+    unawaited(updateAppBadge());
+    if (alertNew && newKeys.isNotEmpty && browserNotificationsEnabled) {
+      unawaited(showStaffNotification(attention[newKeys.first] ?? nextText));
+    }
+    return changed;
   }
 
   Future<void> updateAppBadge() async {
