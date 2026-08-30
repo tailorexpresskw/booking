@@ -388,6 +388,45 @@ def adjust_schedule_capacity(window: str, delta: int) -> None:
     save_booking_schedule(schedule)
 
 
+def schedule_capacity_for_window(window: str) -> int:
+    parsed = parse_visit_window(window)
+    if parsed is None:
+        return 0
+    date_key, slot = parsed
+    schedule = load_booking_schedule()
+    if not schedule.get('enabled', True):
+        return 0
+    rows = schedule.get('rows', [])
+    day = None
+    if isinstance(rows, dict):
+        capacities = rows.get(date_key)
+        if isinstance(capacities, dict):
+            day = {'date': date_key, 'capacities': capacities}
+    elif isinstance(rows, list):
+        day = next(
+            (
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and str(row.get('date', '')).strip() == date_key
+            ),
+            None,
+        )
+    capacities = day.get('capacities') if isinstance(day, dict) else None
+    if isinstance(capacities, list):
+        slots = schedule.get('slots', [])
+        capacities = {
+            schedule_slot: capacities[index] if index < len(capacities) else 0
+            for index, schedule_slot in enumerate(slots)
+        }
+    if not isinstance(capacities, dict):
+        return 0
+    try:
+        return max(int(capacities.get(slot, 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def load_area_prices() -> list[dict]:
     ensure_storage()
     with STORE_LOCK:
@@ -750,6 +789,8 @@ def create_upayments_payment(payload: dict) -> dict:
     order_id = str(payload.get('orderId', '')).strip() or next_order_id(load_orders())
     draft = payload.get('draft')
     if order_id.upper().startswith('DRAFT-') and isinstance(draft, dict):
+        if schedule_capacity_for_window(str(draft.get('window', ''))) <= 0:
+            raise ValueError('Selected appointment is no longer available.')
         save_payment_draft(order_id, draft)
     existing_order = next((item for item in load_orders() if str(item.get('id')) == order_id), None)
     if existing_order is not None:

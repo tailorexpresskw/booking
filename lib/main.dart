@@ -1416,6 +1416,12 @@ class AppState extends ChangeNotifier {
         jsonEncode(bookingSchedule.toJson());
   }
 
+  void updateBookingScheduleLocally(BookingScheduleSettings next) {
+    bookingSchedule = next;
+    _saveBookingSchedule();
+    notifyListeners();
+  }
+
   Future<void> refreshBookingSchedule({bool quiet = false}) async {
     try {
       final response = await html.HttpRequest.request(
@@ -3325,6 +3331,26 @@ class _BookingPageState extends State<BookingPage> {
     );
 
     if (proceed != true || !mounted) return;
+    await widget.state.refreshBookingSchedule(quiet: true);
+    final refreshedSlots = availableVisitSlots;
+    if (!widget.state.isVisitDateAvailable(visitDate) ||
+        !refreshedSlots.contains(window)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(s.t(
+              'This visit time is no longer available. Choose another day or time.',
+              '\u0647\u0630\u0627 \u0645\u0648\u0639\u062f \u0627\u0644\u0632\u064a\u0627\u0631\u0629 \u0644\u0645 \u064a\u0639\u062f \u0645\u062a\u0627\u062d\u0627. \u0627\u062e\u062a\u0631 \u064a\u0648\u0645\u0627 \u0623\u0648 \u0648\u0642\u062a\u0627 \u0622\u062e\u0631.'))));
+      setState(() {
+        if (refreshedSlots.isNotEmpty) {
+          window = refreshedSlots.first;
+        } else {
+          visitDate = widget.state.nextAvailableVisitDate(visitDate);
+          final slots = availableVisitSlots;
+          if (slots.isNotEmpty) window = slots.first;
+        }
+      });
+      return;
+    }
 
     final selectedGateway = paymentGatewayOptions.firstWhere(
       (option) => option['src'] == selectedGatewaySrc,
@@ -6707,6 +6733,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   late final TextEditingController policyEnDetailController;
   late final TextEditingController policyArDetailController;
   late final List<PolicyRecord> policies;
+  final scheduleRecordsScrollController = ScrollController();
   late final List<TextEditingController> capacityControllers;
   late DateTime scheduleFromDate;
   late DateTime scheduleToDate;
@@ -6786,6 +6813,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     policyArNameController.dispose();
     policyEnDetailController.dispose();
     policyArDetailController.dispose();
+    scheduleRecordsScrollController.dispose();
     for (final controller in capacityControllers) {
       controller.dispose();
     }
@@ -6965,9 +6993,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 context,
                 title: s.t('Existing Schedule Records', 'سجلات الجدول الحالية'),
                 action: smallSaveButton(() => unawaited(saveBookingSchedule())),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
+                child: Scrollbar(
+                  controller: scheduleRecordsScrollController,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  interactive: true,
+                  child: SingleChildScrollView(
+                    controller: scheduleRecordsScrollController,
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: DataTable(
                     columns: [
                       dataLabel(s.t('Date', 'التاريخ')),
                       dataLabel(s.t('Day', 'اليوم')),
@@ -7030,6 +7065,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           })),
                         ]),
                     ],
+                    ),
                   ),
                 ),
               ),
@@ -7634,12 +7670,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     };
     rows.putIfAbsent(date, () => <String, int>{});
     rows[date]![slot] = parsed.clamp(0, 999).toInt();
-    s.bookingSchedule = BookingScheduleSettings(
+    s.updateBookingScheduleLocally(BookingScheduleSettings(
       enabled: appointmentEnabled,
       slots: s.bookingSchedule.slots,
       workingDays: workingDays.toSet(),
       rows: rows,
-    );
+    ));
   }
 
   Future<void> saveBookingSchedule({bool regenerate = false}) async {
