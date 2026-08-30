@@ -1894,27 +1894,11 @@ class AppState extends ChangeNotifier {
 
   Future<Map<String, dynamic>> confirmPaymentReturn(
       Map<String, String> params) async {
-    final response = await html.HttpRequest.request(
-      apiUrl('/api/payments/confirm'),
-      method: 'POST',
-      sendData: jsonEncode({
-        'params': params,
-        'orderId': params['order'] ?? '',
-        'source': params['source'] ?? 'return',
-      }),
-      requestHeaders: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-    );
-    final status = response.status ?? 0;
-    final body = response.responseText == null || response.responseText!.isEmpty
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(jsonDecode(response.responseText!) as Map);
-    if (status < 200 || status >= 300) {
-      throw Exception(body['error']?.toString() ??
-          'Payment confirmation could not be verified.');
-    }
+    final body = await postPaymentJson('/api/payments/confirm', {
+      'params': params,
+      'orderId': params['order'] ?? '',
+      'source': params['source'] ?? 'return',
+    });
     final created = body['order'];
     if (created is Map) {
       final order = Order.fromJson(Map<String, dynamic>.from(created));
@@ -1925,6 +1909,20 @@ class AppState extends ChangeNotifier {
       body['orderObject'] = order;
     }
     return body;
+  }
+
+  String paymentReturnDebug(Map<String, String> params) {
+    final result = params['result'] ??
+        params['Result'] ??
+        params['payment_status'] ??
+        params['paymentStatus'] ??
+        params['status'] ??
+        '-';
+    final trackId =
+        params['track_id'] ?? params['trackId'] ?? params['TrackID'] ?? '-';
+    final paymentId =
+        params['payment_id'] ?? params['paymentId'] ?? params['PaymentID'] ?? '-';
+    return 'UPay return: result=$result, track_id=$trackId, payment_id=$paymentId';
   }
 
   Future<Order> createBooking({
@@ -3603,7 +3601,11 @@ class _TrackPageState extends State<TrackPage> {
       });
     } catch (error) {
       if (!mounted) return;
-      final detail = error.toString().replaceFirst('Exception: ', '');
+      final rawDetail = error.toString().replaceFirst('Exception: ', '');
+      final detail =
+          rawDetail.startsWith('Instance of ')
+              ? s.paymentReturnDebug(widget.paymentParams)
+              : rawDetail;
       setState(() {
         paymentSucceeded = false;
         retryDraftId = draftId;
