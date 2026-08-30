@@ -24,7 +24,7 @@ COPY pubspec.yaml ./
 RUN flutter config --enable-web && flutter pub get
 
 COPY . .
-RUN flutter build web --release
+RUN flutter build web --release --pwa-strategy=none
 
 FROM python:3.12-slim AS runtime
 

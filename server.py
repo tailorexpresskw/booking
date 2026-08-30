@@ -264,7 +264,13 @@ def normalize_booking_schedule(payload: dict) -> dict:
         if str(item).strip()
     ]
     rows = []
-    for row in payload.get('rows', []):
+    raw_rows = payload.get('rows', [])
+    if isinstance(raw_rows, dict):
+        raw_rows = [
+            {'date': row_date, 'capacities': capacities}
+            for row_date, capacities in raw_rows.items()
+        ]
+    for row in raw_rows:
         if not isinstance(row, dict):
             continue
         row_date = str(row.get('date', '')).strip()
@@ -281,9 +287,14 @@ def normalize_booking_schedule(payload: dict) -> dict:
                 normalized_capacities[slot] = max(int(capacities.get(slot, 0)), 0)
             except (TypeError, ValueError):
                 normalized_capacities[slot] = 0
+        try:
+            parsed_date = datetime.strptime(row_date, '%d-%m-%Y')
+            fallback_day = parsed_date.strftime('%A')
+        except ValueError:
+            fallback_day = ''
         rows.append({
             'date': row_date,
-            'day': str(row.get('day', '')).strip(),
+            'day': str(row.get('day', '')).strip() or fallback_day,
             'capacities': normalized_capacities,
         })
     if not rows:
@@ -340,19 +351,40 @@ def adjust_schedule_capacity(window: str, delta: int) -> None:
         return
     date_key, slot = parsed
     schedule = load_booking_schedule()
-    rows = schedule.setdefault('rows', {})
-    day = rows.get(date_key)
-    if not isinstance(day, dict) or slot not in day:
+    rows = schedule.setdefault('rows', [])
+    day = None
+    if isinstance(rows, dict):
+        capacities = rows.get(date_key)
+        if isinstance(capacities, dict):
+            day = {'date': date_key, 'capacities': capacities}
+    elif isinstance(rows, list):
+        day = next(
+            (
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and str(row.get('date', '')).strip() == date_key
+            ),
+            None,
+        )
+    capacities = day.get('capacities') if isinstance(day, dict) else None
+    if isinstance(capacities, list):
+        capacities = {
+            schedule_slot: capacities[index] if index < len(capacities) else 0
+            for index, schedule_slot in enumerate(schedule.get('slots', []))
+        }
+        day['capacities'] = capacities
+    if not isinstance(day, dict) or not isinstance(capacities, dict) or slot not in capacities:
         if delta < 0:
             raise ValueError('Selected appointment is not available.')
         return
     try:
-        current = int(day.get(slot, 0))
+        current = int(capacities.get(slot, 0))
     except (TypeError, ValueError):
         current = 0
     if delta < 0 and current <= 0:
         raise ValueError('Selected appointment is no longer available.')
-    day[slot] = max(0, current + delta)
+    capacities[slot] = max(0, current + delta)
     save_booking_schedule(schedule)
 
 
@@ -1105,12 +1137,11 @@ def check_upayments_payment_status(params: dict | str) -> dict:
     }
 
 
-def confirm_upayments_payment(payload: dict) -> dict:
-    params = payload.get('params')
-    if not isinstance(params, dict):
-        params = payload
+def confirm_upayments_payment(payload: object) -> dict:
+    payload_dict = payload if isinstance(payload, dict) else {}
+    params = payload_dict.get('params', payload)
     params = flatten_payment_payload(params)
-    source = str(payload.get('source') or first_query_value(params, 'source')).strip().lower()
+    source = str(payload_dict.get('source') or first_query_value(params, 'source')).strip().lower()
 
     draft_id = first_query_value(
         params,
@@ -1200,9 +1231,12 @@ def confirm_upayments_payment(payload: dict) -> dict:
 
     try:
         order = build_order({**draft, 'paymentStatus': 'paid', 'paymentDraftId': draft_id}, orders)
-        adjust_schedule_capacity(str(order.get('window', '')), -1)
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
+    try:
+        adjust_schedule_capacity(str(order.get('window', '')), -1)
+    except ValueError as exc:
+        order['scheduleWarning'] = str(exc)
     orders.insert(0, order)
     save_orders(orders)
     delete_payment_draft(draft_id)

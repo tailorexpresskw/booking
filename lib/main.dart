@@ -6983,7 +6983,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               parseDateKey(row.key) ?? DateTime.now())))),
                           for (final slot in s.bookingSchedule.slots)
                             DataCell(SizedBox(
-                              width: 72,
+                              width: 88,
                               child: TextFormField(
                                 initialValue: '${row.value[slot] ?? 0}',
                                 keyboardType: TextInputType.number,
@@ -6991,10 +6991,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                   FilteringTextInputFormatter.digitsOnly
                                 ],
                                 textAlign: TextAlign.center,
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   isDense: true,
-                                  contentPadding: EdgeInsets.symmetric(
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 8),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                        color: gold.withOpacity(.45)),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                        color: maroon, width: 2),
+                                  ),
                                 ),
                                 onChanged: (value) =>
                                     updateExistingScheduleCapacity(
