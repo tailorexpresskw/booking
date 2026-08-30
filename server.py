@@ -5,12 +5,17 @@ import re
 import secrets
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 from urllib.parse import unquote, urlparse
 import urllib.parse
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - Python 3.8 fallback.
+    ZoneInfo = None
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / 'build' / 'web'
@@ -26,6 +31,11 @@ BOOKING_SCHEDULE_FILE = DATA_DIR / 'booking_schedule.json'
 STORE_LOCK = Lock()
 DEFAULT_LAT = 29.3759
 DEFAULT_LNG = 47.9774
+try:
+    KUWAIT_TZ = ZoneInfo('Asia/Kuwait') if ZoneInfo else timezone(timedelta(hours=3))
+except Exception:
+    KUWAIT_TZ = timezone(timedelta(hours=3))
+MIN_BOOKING_LEAD_TIME = timedelta(hours=3)
 DEFAULT_TIME_SLOTS = [
     '12:00 PM - 1:00 PM',
     '1:00 PM - 2:00 PM',
@@ -337,6 +347,41 @@ def parse_visit_window(window: str, slots: list[str] | None = None) -> tuple[str
     if len(parts) == 2 and parts[1]:
         return date_key, parts[1]
     return None
+
+
+def kuwait_now() -> datetime:
+    return datetime.now(KUWAIT_TZ).replace(tzinfo=None)
+
+
+def parse_slot_start(date_key: str, slot: str) -> datetime | None:
+    try:
+        parsed_date = datetime.strptime(date_key, '%d-%m-%Y')
+    except ValueError:
+        return None
+    match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(AM|PM)', slot or '', re.IGNORECASE)
+    if match is None:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2) or '0')
+    period = match.group(3).upper()
+    if hour < 1 or hour > 12 or minute < 0 or minute > 59:
+        return None
+    if period == 'PM' and hour != 12:
+        hour += 12
+    if period == 'AM' and hour == 12:
+        hour = 0
+    return parsed_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def visit_window_meets_lead_time(window: str) -> bool:
+    parsed = parse_visit_window(window)
+    if parsed is None:
+        return True
+    date_key, slot = parsed
+    slot_start = parse_slot_start(date_key, slot)
+    if slot_start is None:
+        return True
+    return slot_start >= kuwait_now() + MIN_BOOKING_LEAD_TIME
 
 
 def order_reserves_schedule(order: dict) -> bool:
@@ -789,6 +834,8 @@ def create_upayments_payment(payload: dict) -> dict:
     order_id = str(payload.get('orderId', '')).strip() or next_order_id(load_orders())
     draft = payload.get('draft')
     if order_id.upper().startswith('DRAFT-') and isinstance(draft, dict):
+        if not visit_window_meets_lead_time(str(draft.get('window', ''))):
+            raise ValueError('Selected appointment must be booked at least 3 hours in advance.')
         if schedule_capacity_for_window(str(draft.get('window', ''))) <= 0:
             raise ValueError('Selected appointment is no longer available.')
         save_payment_draft(order_id, draft)

@@ -628,6 +628,32 @@ String? parseVisitSlotFromWindow(String value, Iterable<String> slots) {
   return slot.isEmpty ? null : slot;
 }
 
+const minimumBookingLeadTime = Duration(hours: 3);
+
+DateTime? parseVisitSlotStart(DateTime date, String slot) {
+  final match = RegExp(
+    r'(\d{1,2})(?::(\d{2}))?\s*(AM|PM)',
+    caseSensitive: false,
+  ).firstMatch(slot);
+  if (match == null) return null;
+  var hour = int.tryParse(match.group(1) ?? '');
+  final minute = int.tryParse(match.group(2) ?? '0') ?? 0;
+  final period = (match.group(3) ?? '').toUpperCase();
+  if (hour == null || hour < 1 || hour > 12 || minute < 0 || minute > 59) {
+    return null;
+  }
+  if (period == 'PM' && hour != 12) hour += 12;
+  if (period == 'AM' && hour == 12) hour = 0;
+  return DateTime(date.year, date.month, date.day, hour, minute);
+}
+
+bool visitSlotMeetsLeadTime(DateTime date, String slot, {DateTime? now}) {
+  final slotStart = parseVisitSlotStart(date, slot);
+  if (slotStart == null) return true;
+  final cutoff = (now ?? DateTime.now()).add(minimumBookingLeadTime);
+  return !slotStart.isBefore(cutoff);
+}
+
 String weekdayName(DateTime value) => switch (value.weekday) {
       DateTime.monday => 'Monday',
       DateTime.tuesday => 'Tuesday',
@@ -1475,7 +1501,8 @@ class AppState extends ChangeNotifier {
     if (capacities == null) return const [];
     return [
       for (final slot in bookingSchedule.slots)
-        if ((capacities[slot] ?? 0) > 0) slot,
+        if ((capacities[slot] ?? 0) > 0 && visitSlotMeetsLeadTime(date, slot))
+          slot,
     ];
   }
 
