@@ -13,6 +13,12 @@ from urllib.parse import unquote, urlparse
 import urllib.parse
 
 try:
+    from pywebpush import WebPushException, webpush
+except Exception:  # pragma: no cover - optional production dependency.
+    WebPushException = Exception
+    webpush = None
+
+try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover - Python 3.8 fallback.
     ZoneInfo = None
@@ -28,6 +34,7 @@ STAFF_USERS_FILE = DATA_DIR / 'staff_users.json'
 AREA_PRICES_FILE = DATA_DIR / 'area_prices.json'
 PAYMENT_DRAFTS_FILE = DATA_DIR / 'payment_drafts.json'
 BOOKING_SCHEDULE_FILE = DATA_DIR / 'booking_schedule.json'
+PUSH_SUBSCRIPTIONS_FILE = DATA_DIR / 'push_subscriptions.json'
 STORE_LOCK = Lock()
 DEFAULT_LAT = 29.3759
 DEFAULT_LNG = 47.9774
@@ -212,6 +219,8 @@ def ensure_storage() -> None:
             json.dumps(default_booking_schedule(), ensure_ascii=False, indent=2),
             encoding='utf-8',
         )
+    if not PUSH_SUBSCRIPTIONS_FILE.exists():
+        PUSH_SUBSCRIPTIONS_FILE.write_text('[]', encoding='utf-8')
 
 
 def default_area_prices() -> list[dict]:
@@ -657,6 +666,210 @@ def save_staff_users(users: list[dict]) -> None:
     normalized = [normalize_staff_user(user) for user in users]
     with STORE_LOCK:
         STAFF_USERS_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def load_push_subscriptions() -> list[dict]:
+    ensure_storage()
+    with STORE_LOCK:
+        payload = json.loads(PUSH_SUBSCRIPTIONS_FILE.read_text(encoding='utf-8-sig'))
+    if not isinstance(payload, list):
+        return []
+    subscriptions: list[dict] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        endpoint = str(item.get('endpoint', '')).strip()
+        keys = item.get('keys')
+        if not endpoint or not isinstance(keys, dict):
+            continue
+        subscriptions.append({
+            'endpoint': endpoint,
+            'keys': {
+                'p256dh': str(keys.get('p256dh', '')).strip(),
+                'auth': str(keys.get('auth', '')).strip(),
+            },
+            'username': str(item.get('username', '')).strip().lower(),
+            'displayName': str(item.get('displayName', '')).strip(),
+            'role': str(item.get('role', '')).strip(),
+            'updatedAt': str(item.get('updatedAt', '')).strip(),
+        })
+    return subscriptions
+
+
+def save_push_subscriptions(subscriptions: list[dict]) -> None:
+    ensure_storage()
+    with STORE_LOCK:
+        PUSH_SUBSCRIPTIONS_FILE.write_text(
+            json.dumps(subscriptions, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+
+
+def upsert_push_subscription(payload: dict) -> dict:
+    endpoint = str(payload.get('endpoint', '')).strip()
+    keys = payload.get('keys')
+    role = str(payload.get('role', '')).strip()
+    username = str(payload.get('username', '')).strip().lower()
+    if not endpoint or not isinstance(keys, dict):
+        raise ValueError('Invalid push subscription.')
+    if role not in VALID_ROLES:
+        raise ValueError('Invalid staff role.')
+    subscription = {
+        'endpoint': endpoint,
+        'keys': {
+            'p256dh': str(keys.get('p256dh', '')).strip(),
+            'auth': str(keys.get('auth', '')).strip(),
+        },
+        'username': username,
+        'displayName': str(payload.get('displayName', '')).strip(),
+        'role': role,
+        'updatedAt': datetime.now(KUWAIT_TZ).isoformat(),
+    }
+    if not subscription['keys']['p256dh'] or not subscription['keys']['auth']:
+        raise ValueError('Invalid push subscription keys.')
+
+    subscriptions = [
+        item for item in load_push_subscriptions()
+        if item.get('endpoint') != endpoint
+    ]
+    subscriptions.append(subscription)
+    save_push_subscriptions(subscriptions)
+    return {
+        'ok': True,
+        'enabled': push_is_configured(),
+        'subscriptions': len(subscriptions),
+    }
+
+
+def push_is_configured() -> bool:
+    return bool(
+        webpush is not None
+        and os.environ.get('VAPID_PUBLIC_KEY', '').strip()
+        and os.environ.get('VAPID_PRIVATE_KEY', '').strip()
+    )
+
+
+def push_config() -> dict:
+    return {
+        'enabled': push_is_configured(),
+        'publicKey': os.environ.get('VAPID_PUBLIC_KEY', '').strip(),
+    }
+
+
+def send_staff_push(
+    message: str,
+    *,
+    roles: set[str] | None = None,
+    usernames: set[str] | None = None,
+    order_id: str = '',
+) -> None:
+    if not push_is_configured():
+        return
+    target_roles = roles or set()
+    target_users = {item.lower() for item in (usernames or set()) if item}
+    subscriptions = load_push_subscriptions()
+    if not subscriptions:
+        return
+
+    payload = json.dumps({
+        'title': 'Tailor Express',
+        'body': message,
+        'url': '/staff',
+        'orderId': order_id,
+        'icon': '/icons/tailor-logo-192.png',
+        'badge': '/icons/tailor-logo-192.png',
+    }, ensure_ascii=False)
+    claims_sub = os.environ.get('VAPID_CLAIMS_SUB', 'mailto:support@tailorexpresskw.com').strip()
+    private_key = os.environ.get('VAPID_PRIVATE_KEY', '').strip()
+    kept: list[dict] = []
+    changed = False
+    for subscription in subscriptions:
+        role = str(subscription.get('role', '')).strip()
+        username = str(subscription.get('username', '')).strip().lower()
+        matches_role = bool(target_roles and role in target_roles)
+        matches_user = bool(target_users and username in target_users)
+        if not matches_role and not matches_user:
+            kept.append(subscription)
+            continue
+        try:
+            webpush(
+                subscription_info={
+                    'endpoint': subscription['endpoint'],
+                    'keys': subscription['keys'],
+                },
+                data=payload,
+                vapid_private_key=private_key,
+                vapid_claims={'sub': claims_sub},
+            )
+            kept.append(subscription)
+        except WebPushException as exc:
+            status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
+            if status_code in {404, 410}:
+                changed = True
+                continue
+            print(f'Push notification failed: {exc}')
+            kept.append(subscription)
+        except Exception as exc:
+            print(f'Push notification failed: {exc}')
+            kept.append(subscription)
+    if changed:
+        save_push_subscriptions(kept)
+
+
+def notify_order_created(order: dict) -> None:
+    order_id = str(order.get('id', '')).strip()
+    send_staff_push(
+        f'New booking {order_id} needs branch assignment.',
+        roles={'admin', 'receptionistSupervisor'},
+        order_id=order_id,
+    )
+
+
+def notify_order_changed(original: dict, order: dict) -> None:
+    order_id = str(order.get('id', '')).strip()
+    branch = str(order.get('branch', '')).strip()
+    driver = str(order.get('driver', '')).strip()
+    receptionist = str(order.get('receptionist', '')).strip()
+    old_branch = str(original.get('branch', '')).strip()
+    old_driver = str(original.get('driver', '')).strip()
+    old_receptionist = str(original.get('receptionist', '')).strip()
+
+    if branch and branch != 'Pending assignment' and branch != old_branch:
+        send_staff_push(
+            f'{order_id} was assigned to {branch}. Driver follow-up is needed.',
+            roles={'admin', 'driverSupervisor'},
+            order_id=order_id,
+        )
+    if receptionist and receptionist != 'Pending assignment' and receptionist != old_receptionist:
+        users = {
+            user.get('username', '').lower()
+            for user in load_staff_users()
+            if str(user.get('displayName', '')).strip().lower() == receptionist.lower()
+        }
+        send_staff_push(
+            f'{order_id} was assigned to receptionist {receptionist}.',
+            roles={'admin', 'receptionistSupervisor'},
+            usernames=users,
+            order_id=order_id,
+        )
+    if driver and driver != 'Pending assignment' and driver != old_driver:
+        users = {
+            user.get('username', '').lower()
+            for user in load_staff_users()
+            if str(user.get('displayName', '')).strip().lower() == driver.lower()
+        }
+        send_staff_push(
+            f'{order_id} was assigned to driver {driver}.',
+            roles={'admin', 'driverSupervisor'},
+            usernames=users,
+            order_id=order_id,
+        )
+    if str(order.get('stage', '')).strip() != str(original.get('stage', '')).strip():
+        send_staff_push(
+            f'{order_id} status changed to {order.get("stage", "")}.',
+            roles={'admin', 'receptionistSupervisor', 'driverSupervisor'},
+            order_id=order_id,
+        )
 
 
 def authenticate_staff(username: str, password: str) -> dict | None:
@@ -1327,6 +1540,7 @@ def confirm_upayments_payment(payload: object) -> dict:
         order['scheduleWarning'] = str(exc)
     orders.insert(0, order)
     save_orders(orders)
+    notify_order_created(order)
     delete_payment_draft(draft_id)
     return {**status, 'order': order}
 
@@ -1455,6 +1669,9 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/staff-users':
             self._send_json([public_staff_user(user) for user in load_staff_users()])
             return
+        if parsed.path == '/api/push/config':
+            self._send_json(push_config())
+            return
         if parsed.path == '/api/payments/status':
             query = urllib.parse.parse_qs(parsed.query)
             try:
@@ -1533,6 +1750,18 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self._send_json({'user': user})
             return
 
+        if parsed.path == '/api/push/subscribe':
+            try:
+                payload = self._read_json_body()
+                result = upsert_push_subscription(payload)
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON body'}, status=400)
+            except ValueError as exc:
+                self._send_json({'error': str(exc)}, status=400)
+            else:
+                self._send_json(result, status=201)
+            return
+
         if parsed.path == '/api/staff-users':
             try:
                 payload = self._read_json_body()
@@ -1587,6 +1816,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
             return
         orders.insert(0, order)
         save_orders(orders)
+        notify_order_created(order)
         self._send_json(order, status=201)
 
     def do_PATCH(self) -> None:
@@ -1695,6 +1925,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
             timeline.append(f'{timestamp()} - {note}')
 
         save_orders(orders)
+        notify_order_changed(original, order)
         self._send_json(order)
 
     def do_DELETE(self) -> None:

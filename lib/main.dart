@@ -987,6 +987,9 @@ class AppState extends ChangeNotifier {
     if (persist) {
       html.window.localStorage[staffSessionStorageKey] = staff.username;
     }
+    if (browserNotificationsEnabled) {
+      unawaited(registerPushSubscription());
+    }
   }
 
   void _clearStaffSession() {
@@ -1034,7 +1037,33 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       notificationPermission = 'unsupported';
     }
+    if (browserNotificationsEnabled) {
+      unawaited(registerPushSubscription());
+    }
     notifyListeners();
+  }
+
+  Future<void> registerPushSubscription() async {
+    final staff = currentStaff;
+    if (staff == null || !browserNotificationsEnabled) return;
+    try {
+      if (!js_util.hasProperty(html.window, 'tailorSubscribePush')) return;
+      await js_util.promiseToFuture<Object?>(js_util.callMethod(
+        html.window,
+        'tailorSubscribePush',
+        [
+          apiUrl('/api/push/config'),
+          apiUrl('/api/push/subscribe'),
+          js_util.jsify({
+            'username': staff.username,
+            'displayName': staff.displayName,
+            'role': staff.role.name,
+          }),
+        ],
+      ));
+    } catch (_) {
+      // In-app polling notifications still work if Web Push is blocked.
+    }
   }
 
   void toggleLang() {

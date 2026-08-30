@@ -42,6 +42,32 @@ Default credentials:
 
 Admin can create extra staff users from the Staff Users panel. Prototype staff users are stored in data/staff_users.json; production should move staff accounts to a real database with hashed passwords.
 
+## Staff push notifications
+
+The staff web app supports Android Chrome/Google browser Web Push when the site is installed or opened and notifications are allowed. Existing in-app badges and polling still work as a fallback.
+
+Render environment variables required for real push:
+
+- `VAPID_PUBLIC_KEY`: public Web Push VAPID key.
+- `VAPID_PRIVATE_KEY`: private Web Push VAPID key. Keep this secret.
+- `VAPID_CLAIMS_SUB`: contact claim for the push service, for example `mailto:support@tailorexpresskw.com`.
+
+Staff setup:
+
+1. Open `/login/staff` on the staff phone.
+2. Sign in with the staff username and password.
+3. Add the site to the phone Home Screen if they want app-like use.
+4. Tap `Enable notifications` inside the staff dashboard.
+5. Allow browser notifications when Android asks.
+
+Notification routing:
+
+- New paid booking: Management/Admin and Receptionist Supervisor.
+- Branch assigned: Management/Admin and Driver Supervisor.
+- Receptionist assigned: Management/Admin, Receptionist Supervisor and that receptionist if subscribed.
+- Driver assigned: Management/Admin, Driver Supervisor and that driver if subscribed.
+- Status changed: Management/Admin and supervisors.
+
 ## Payment API
 
 The app uses a backend UPay/UPayments hosted-checkout endpoint at `/api/payments/create`.
