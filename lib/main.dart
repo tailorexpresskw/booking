@@ -1953,8 +1953,10 @@ class AppState extends ChangeNotifier {
         '-';
     final trackId =
         params['track_id'] ?? params['trackId'] ?? params['TrackID'] ?? '-';
-    final paymentId =
-        params['payment_id'] ?? params['paymentId'] ?? params['PaymentID'] ?? '-';
+    final paymentId = params['payment_id'] ??
+        params['paymentId'] ??
+        params['PaymentID'] ??
+        '-';
     return 'UPay return: result=$result, track_id=$trackId, payment_id=$paymentId';
   }
 
@@ -3655,10 +3657,9 @@ class _TrackPageState extends State<TrackPage> {
     } catch (error) {
       if (!mounted) return;
       final rawDetail = error.toString().replaceFirst('Exception: ', '');
-      final detail =
-          rawDetail.startsWith('Instance of ')
-              ? s.paymentReturnDebug(widget.paymentParams)
-              : rawDetail;
+      final detail = rawDetail.startsWith('Instance of ')
+          ? s.paymentReturnDebug(widget.paymentParams)
+          : rawDetail;
       setState(() {
         paymentSucceeded = false;
         retryDraftId = draftId;
@@ -4154,11 +4155,13 @@ class OrdersDashboardTable extends StatefulWidget {
     required this.state,
     required this.orders,
     this.title,
+    this.historyMode = false,
   });
 
   final AppState state;
   final List<Order> orders;
   final String? title;
+  final bool historyMode;
 
   @override
   State<OrdersDashboardTable> createState() => _OrdersDashboardTableState();
@@ -4313,12 +4316,34 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     );
   }
 
+  bool tableIncludesOrder(Order order) {
+    if (!hasConfirmedPayment(order)) return false;
+    if (widget.historyMode) return isClosedOrder(order);
+    return order.stage != Stage.delivered;
+  }
+
+  List<Order> get baseVisibleOrders =>
+      widget.orders.where(tableIncludesOrder).toList();
+
+  bool canRescheduleOrder(Order order) =>
+      canCancelOrReschedule && order.stage != Stage.delivered;
+
+  bool canCancelOrder(Order order) =>
+      canCancelOrReschedule && !isClosedOrder(order);
+
+  Color? orderSurfaceColor(Order order,
+      {required bool highlighted, required bool today}) {
+    if (order.stage == Stage.cancelled) return const Color(0xFFFFE3E1);
+    if (today) return const Color(0xFFFFF3C4);
+    if (highlighted) return blush;
+    return null;
+  }
+
   List<Order> get filteredOrders {
     final query = search.text.trim().toLowerCase();
     final branch = selectedBranch.toLowerCase();
     final orders = widget.orders.where((order) {
-      if (!hasConfirmedPayment(order)) return false;
-      if (isClosedOrder(order)) return false;
+      if (!tableIncludesOrder(order)) return false;
       if (selectedStage != null &&
           stageRank(order.stage) != stageRank(selectedStage!)) {
         return false;
@@ -4379,9 +4404,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   }
 
   List<String> get branchOptions {
-    final branches = widget.orders
-        .where(hasConfirmedPayment)
-        .where((order) => !isClosedOrder(order))
+    final branches = baseVisibleOrders
         .map((order) => order.branch.trim())
         .where((branch) => branch.isNotEmpty && !isPendingAssignment(branch))
         .toSet()
@@ -4514,13 +4537,6 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   }
 
   Future<void> cancelOrderFromTable(BuildContext context, Order order) async {
-    final reason = await showTextEntryDialog(
-      context,
-      title: state.t('Cancel order', 'إلغاء الطلب'),
-      label: state.t('Reason', 'السبب'),
-    );
-    if (reason == null) return;
-    if (!context.mounted) return;
     final confirmed = await showConfirmActionDialog(
       context,
       state: state,
@@ -4532,6 +4548,13 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       confirmLabel: state.t('Yes, cancel', 'نعم، إلغاء'),
     );
     if (!confirmed) return;
+    if (!context.mounted) return;
+    final reason = await showTextEntryDialog(
+      context,
+      title: state.t('Cancel order', 'إلغاء الطلب'),
+      label: state.t('Reason', 'السبب'),
+    );
+    if (reason == null) return;
     try {
       await state.updateOrder(
         order.id,
@@ -4681,12 +4704,12 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                 : () => assignDriverFromTable(context, order),
           ),
           if (canChangeStatus && !isClosedOrder(order)) statusMenu(order),
-          if (canCancelOrReschedule && !isClosedOrder(order))
+          if (canRescheduleOrder(order))
             compactTableButton(
               label: state.t('Reschedule', 'إعادة الموعد'),
               onPressed: () => rescheduleOrderFromTable(context, order),
             ),
-          if (canCancelOrReschedule && !isClosedOrder(order))
+          if (canCancelOrder(order))
             compactTableButton(
               label: state.t('Cancel', 'إلغاء'),
               onPressed: () => cancelOrderFromTable(context, order),
@@ -4750,12 +4773,12 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               value: 'stage:${stage.name}',
               child: Text(stageLabel(stage, state.isArabic)),
             ),
-        if (canCancelOrReschedule && !isClosedOrder(order))
+        if (canRescheduleOrder(order))
           PopupMenuItem(
             value: 'reschedule',
             child: Text(state.t('Reschedule order', 'إعادة جدولة الطلب')),
           ),
-        if (canCancelOrReschedule && !isClosedOrder(order))
+        if (canCancelOrder(order))
           PopupMenuItem(
             value: 'cancel',
             child: Text(state.t('Cancel order', 'إلغاء الطلب')),
@@ -4814,11 +4837,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   Widget mobileOrderCard(BuildContext context, Order order,
       {bool highlighted = false, bool today = false}) {
     return Card(
-      color: today
-          ? const Color(0xFFFFF3C4)
-          : highlighted
-              ? blush
-              : null,
+      color: orderSurfaceColor(order, highlighted: highlighted, today: today),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -4830,7 +4849,11 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               Text(order.id,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: (today || highlighted) ? maroon : ink)),
+                      color: (today ||
+                              highlighted ||
+                              order.stage == Stage.cancelled)
+                          ? maroon
+                          : ink)),
               if (today)
                 badge(
                     state.t('Today', '\u0627\u0644\u064a\u0648\u0645'), maroon),
@@ -4865,18 +4888,24 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   Widget build(BuildContext context) {
     final shown = filteredOrders;
     final compact = MediaQuery.of(context).size.width < 760;
-    final visibleOrders = widget.orders
-        .where((order) => hasConfirmedPayment(order) && !isClosedOrder(order))
-        .toList();
-    final nearestActiveId = shown.isEmpty ? null : shown.first.id;
-    final stageFilters = [
-      null,
-      Stage.newBooking,
-      Stage.completed,
-      Stage.onShop,
-      Stage.ready,
-      Stage.outForDelivery,
-    ];
+    final visibleOrders = baseVisibleOrders;
+    final nearestActiveId =
+        widget.historyMode || shown.isEmpty ? null : shown.first.id;
+    final stageFilters = widget.historyMode
+        ? [
+            null,
+            Stage.delivered,
+            Stage.cancelled,
+          ]
+        : [
+            null,
+            Stage.newBooking,
+            Stage.completed,
+            Stage.onShop,
+            Stage.ready,
+            Stage.outForDelivery,
+            Stage.cancelled,
+          ];
     return adminCard(
       context,
       title: widget.title ?? state.t('Orders', 'الطلبات'),
@@ -5007,8 +5036,12 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             child: Text(
               visibleOrders.isEmpty
                   ? state.t(
-                      'No confirmed orders yet. Failed or cancelled payment attempts are hidden.',
-                      'لا توجد طلبات مؤكدة حتى الآن. يتم إخفاء محاولات الدفع الفاشلة أو الملغاة.')
+                      widget.historyMode
+                          ? 'No history orders yet.'
+                          : 'No confirmed orders yet. Failed or cancelled payment attempts are hidden.',
+                      widget.historyMode
+                          ? 'لا توجد طلبات في السجل حتى الآن.'
+                          : 'لا توجد طلبات مؤكدة حتى الآن. يتم إخفاء محاولات الدفع الفاشلة أو الملغاة.')
                   : state.t('No orders match the selected filters.',
                       'لا توجد طلبات تطابق الفلاتر المحددة.'),
               style: const TextStyle(color: Color(0xFF756A5C)),
@@ -5051,32 +5084,37 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                 for (final order in shown.take(120))
                   DataRow(
                       color: WidgetStateProperty.resolveWith(
-                          (states) => isTodayVisit(order)
-                              ? const Color(0xFFFFF3C4)
-                              : order.id == nearestActiveId
-                                  ? blush
-                                  : null),
+                        (states) => orderSurfaceColor(
+                          order,
+                          highlighted: order.id == nearestActiveId,
+                          today: isTodayVisit(order),
+                        ),
+                      ),
                       cells: [
                         textCell(order.id,
                             width: 96,
                             maxLines: 1,
                             color: isTodayVisit(order) ||
-                                    order.id == nearestActiveId
+                                    order.id == nearestActiveId ||
+                                    order.stage == Stage.cancelled
                                 ? maroon
                                 : null,
                             weight: isTodayVisit(order) ||
-                                    order.id == nearestActiveId
+                                    order.id == nearestActiveId ||
+                                    order.stage == Stage.cancelled
                                 ? FontWeight.w800
                                 : null),
                         DataCell(desktopActionMenu(context, order)),
                         textCell(order.window,
                             width: 220,
                             color: isTodayVisit(order) ||
-                                    order.id == nearestActiveId
+                                    order.id == nearestActiveId ||
+                                    order.stage == Stage.cancelled
                                 ? maroon
                                 : null,
                             weight: isTodayVisit(order) ||
-                                    order.id == nearestActiveId
+                                    order.id == nearestActiveId ||
+                                    order.stage == Stage.cancelled
                                 ? FontWeight.w800
                                 : null),
                         textCell(order.customer, width: 170),
@@ -5979,12 +6017,10 @@ Future<String?> showRescheduleDialog(
                   initialDate: selectedDate,
                   firstDate: DateTime.now(),
                   lastDate: DateTime.now().add(const Duration(days: 45)),
-                  selectableDayPredicate: (date) =>
-                      canUseCurrentDate &&
-                              formatVisitDate(date) ==
-                                  formatVisitDate(currentDate)
-                          ? true
-                          : state.isVisitDateAvailable(date),
+                  selectableDayPredicate: (date) => canUseCurrentDate &&
+                          formatVisitDate(date) == formatVisitDate(currentDate)
+                      ? true
+                      : state.isVisitDateAvailable(date),
                 );
                 if (picked == null) return;
                 setDialogState(() {
@@ -6883,7 +6919,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
           DriverAssignmentCard(state: s),
         ],
         if (selectedSection == AdminSection.history)
-          OperationsTrackingPanel(state: s),
+          OrdersDashboardTable(
+            state: s,
+            orders: s.orders,
+            title: s.t('History', 'السجل'),
+            historyMode: true,
+          ),
         if (selectedSection == AdminSection.prices) AreaPricesPanel(state: s),
         if (selectedSection == AdminSection.users) StaffUsersPanel(state: s),
         if (selectedSection == AdminSection.schedule)
@@ -7030,68 +7071,68 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.only(bottom: 16),
                     child: DataTable(
-                    columns: [
-                      dataLabel(s.t('Date', 'التاريخ')),
-                      dataLabel(s.t('Day', 'اليوم')),
-                      for (final slot in s.bookingSchedule.slots)
-                        dataLabel(slot),
-                      dataLabel(s.t('Action', 'الإجراء')),
-                    ],
-                    rows: [
-                      for (final row in s.bookingSchedule.rows.entries)
-                        DataRow(cells: [
-                          DataCell(Text(row.key)),
-                          DataCell(Text(dayLabel(weekdayName(
-                              parseDateKey(row.key) ?? DateTime.now())))),
-                          for (final slot in s.bookingSchedule.slots)
-                            DataCell(SizedBox(
-                              width: 88,
-                              child: TextFormField(
-                                initialValue: '${row.value[slot] ?? 0}',
-                                keyboardType: TextInputType.number,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly
-                                ],
-                                textAlign: TextAlign.center,
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 8),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
+                      columns: [
+                        dataLabel(s.t('Date', 'التاريخ')),
+                        dataLabel(s.t('Day', 'اليوم')),
+                        for (final slot in s.bookingSchedule.slots)
+                          dataLabel(slot),
+                        dataLabel(s.t('Action', 'الإجراء')),
+                      ],
+                      rows: [
+                        for (final row in s.bookingSchedule.rows.entries)
+                          DataRow(cells: [
+                            DataCell(Text(row.key)),
+                            DataCell(Text(dayLabel(weekdayName(
+                                parseDateKey(row.key) ?? DateTime.now())))),
+                            for (final slot in s.bookingSchedule.slots)
+                              DataCell(SizedBox(
+                                width: 88,
+                                child: TextFormField(
+                                  initialValue: '${row.value[slot] ?? 0}',
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly
+                                  ],
+                                  textAlign: TextAlign.center,
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 8),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide(
+                                          color: gold.withOpacity(.45)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(
+                                          color: maroon, width: 2),
+                                    ),
                                   ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                        color: gold.withOpacity(.45)),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
-                                        color: maroon, width: 2),
-                                  ),
+                                  onChanged: (value) =>
+                                      updateExistingScheduleCapacity(
+                                          row.key, slot, value),
                                 ),
-                                onChanged: (value) =>
-                                    updateExistingScheduleCapacity(
-                                        row.key, slot, value),
-                              ),
-                            )),
-                          DataCell(Builder(builder: (context) {
-                            final closed =
-                                row.value.values.every((value) => value <= 0);
-                            return compactTableButton(
-                              label: closed
-                                  ? s.t('Open', 'فتح')
-                                  : s.t('Close', 'إغلاق'),
-                              onPressed: () => unawaited(closed
-                                  ? activateScheduleDate(row.key)
-                                  : deactivateScheduleDate(row.key)),
-                            );
-                          })),
-                        ]),
-                    ],
+                              )),
+                            DataCell(Builder(builder: (context) {
+                              final closed =
+                                  row.value.values.every((value) => value <= 0);
+                              return compactTableButton(
+                                label: closed
+                                    ? s.t('Open', 'فتح')
+                                    : s.t('Close', 'إغلاق'),
+                                onPressed: () => unawaited(closed
+                                    ? activateScheduleDate(row.key)
+                                    : deactivateScheduleDate(row.key)),
+                              );
+                            })),
+                          ]),
+                      ],
                     ),
                   ),
                 ),
