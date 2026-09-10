@@ -4007,11 +4007,8 @@ class StaffHubPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Shell(
       state: state,
-      title: state.t('One private staff login.',
-          '\u062a\u0633\u062c\u064a\u0644 \u062f\u062e\u0648\u0644 \u0645\u0648\u062d\u062f \u0644\u0644\u0645\u0648\u0638\u0641\u064a\u0646.'),
-      subtitle: state.t(
-          'Use /login/staff. The account role decides which dashboard features are available.',
-          '\u0627\u0633\u062a\u062e\u062f\u0645 /login/staff. \u0646\u0648\u0639 \u0627\u0644\u062d\u0633\u0627\u0628 \u064a\u062d\u062f\u062f \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u062d\u0629 \u0628\u0639\u062f \u0627\u0644\u062f\u062e\u0648\u0644.'),
+      title: state.t('Staff login.', '\u062f\u062e\u0648\u0644 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646.'),
+      subtitle: '',
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 720),
@@ -4075,9 +4072,7 @@ class _LoginPageState extends State<LoginPage> {
       state: s,
       title: s.t('Staff login.',
           '\u062a\u0633\u062c\u064a\u0644 \u062f\u062e\u0648\u0644 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646.'),
-      subtitle: s.t(
-          'One private link for admin, supervisors, receptionists, tailors and drivers. Permissions come from the user role.',
-          '\u0631\u0627\u0628\u0637 \u062e\u0627\u0635 \u0648\u0627\u062d\u062f \u0644\u0644\u0625\u062f\u0627\u0631\u0629 \u0648\u0627\u0644\u0645\u0634\u0631\u0641\u064a\u0646 \u0648\u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u0648\u0627\u0644\u062e\u064a\u0627\u0637\u064a\u0646 \u0648\u0627\u0644\u0633\u0627\u0626\u0642\u064a\u0646. \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u062d\u0633\u0628 \u0646\u0648\u0639 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645.'),
+      subtitle: '',
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 500),
@@ -4149,9 +4144,7 @@ class LockedPage extends StatelessWidget {
     return Shell(
       state: state,
       title: state.t('Access denied.', 'تم رفض الوصول.'),
-      subtitle: state.t(
-          'This dashboard needs the correct role login and stays hidden from customer pages.',
-          'هذه اللوحة تحتاج إلى تسجيل دخول الدور الصحيح وتبقى مخفية عن صفحات العميل.'),
+      subtitle: '',
       body: ElevatedButton(
           onPressed: () =>
               Navigator.of(context).pushReplacementNamed('/login/staff'),
@@ -4195,12 +4188,9 @@ class DashboardPage extends StatelessWidget {
     return Shell(
       state: state,
       role: role,
-      title: state.t(
-          '${roleLabel(role, false)} dashboard on its own protected route.',
-          'لوحة ${roleLabel(role, true)} على رابطها المحمي الخاص.'),
-      subtitle: state.t(
-          'This route is separated from the public customer pages and locked by role.',
-          'هذا الرابط منفصل عن صفحات العميل العامة ومقفل حسب الدور.'),
+      title: state.t('${roleLabel(role, false)} dashboard.',
+          '\u0644\u0648\u062d\u0629 ${roleLabel(role, true)}.'),
+      subtitle: '',
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(
@@ -5574,11 +5564,9 @@ class ReceptionistSupervisorDashboard extends StatelessWidget {
     return Shell(
       state: state,
       role: role,
-      title: state.t('Reception supervisor receives new booking notifications.',
-          'مشرف الاستقبال يستقبل تنبيهات الحجوزات الجديدة.'),
-      subtitle: state.t(
-          'Assign the branch first, then optionally select the receptionist for the order.',
-          'عيّن الفرع أولاً، ثم اختر موظف الاستقبال للطلب إذا كان معروفاً.'),
+      title: state.t('Reception supervisor dashboard.',
+          '\u0644\u0648\u062d\u0629 \u0645\u0634\u0631\u0641 \u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644.'),
+      subtitle: '',
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(state.t('New notifications', 'تنبيهات جديدة'),
@@ -5662,11 +5650,9 @@ class DriverSupervisorDashboard extends StatelessWidget {
     return Shell(
       state: state,
       role: role,
-      title: state.t('Driver supervisor is notified after branch assignment.',
-          'مشرف السائقين يستقبل التنبيه بعد تعيين الفرع.'),
-      subtitle: state.t(
-          'Assign drivers only after an order is Ready, then it moves to Out for Delivery.',
-          'عيّن السائق بعد أن يصبح الطلب جاهزاً، ثم ينتقل إلى خارج للتوصيل.'),
+      title: state.t('Driver supervisor dashboard.',
+          '\u0644\u0648\u062d\u0629 \u0645\u0634\u0631\u0641 \u0627\u0644\u0633\u0627\u0626\u0642\u064a\u0646.'),
+      subtitle: '',
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(state.t('Ready for driver', 'جاهز لتعيين السائق'),
@@ -5758,11 +5744,9 @@ class ReceptionistDashboard extends StatelessWidget {
     return Shell(
       state: state,
       role: role,
-      title: state.t('Receptionist can prepare assigned branch orders.',
-          'موظف الاستقبال يجهز الطلبات المعينة للفرع.'),
-      subtitle: state.t(
-          'Mark orders as Ready when the branch work is complete.',
-          'حوّل الطلب إلى جاهز عند اكتمال العمل في الفرع.'),
+      title: state.t('Receptionist dashboard.',
+          '\u0644\u0648\u062d\u0629 \u0645\u0648\u0638\u0641 \u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644.'),
+      subtitle: '',
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(state.t('Branch orders', 'طلبات الفرع'),
@@ -7033,12 +7017,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Shell(
       state: s,
       role: Role.admin,
-      title: s.t(
-          'Admin dashboard with booking schedule, branches and policy settings.',
-          'لوحة الإدارة مع إعدادات جدول الحجوزات والفروع والسياسات.'),
-      subtitle: s.t(
-          'This admin route now includes the same settings structure you showed: scheduling, branch management and bilingual policy editing.',
-          'هذا الرابط الإداري يتضمن الآن نفس هيكل الإعدادات الذي عرضته: الجدولة وإدارة الفروع وتحرير السياسات باللغتين.'),
+      title: s.t('Admin dashboard.', '\u0644\u0648\u062d\u0629 \u0627\u0644\u0625\u062f\u0627\u0631\u0629.'),
+      subtitle: '',
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 16, runSpacing: 16, children: [
           metric(s.t('All orders', 'كل الطلبات'), '${visibleOrders.length}'),
