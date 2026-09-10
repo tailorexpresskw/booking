@@ -1623,12 +1623,10 @@ class TailorHandler(SimpleHTTPRequestHandler):
 
     def _static_cache_control(self, path: str) -> str:
         name = path.rsplit('/', 1)[-1].lower()
-        if name in {'index.html', 'flutter_bootstrap.js', 'version.json', 'sw.js'}:
+        if name in {'index.html', 'flutter_bootstrap.js', 'version.json', 'sw.js', 'main.dart.js', 'flutter.js'}:
             return 'no-cache'
         if path.startswith('/assets/') or path.startswith('/canvaskit/') or path.startswith('/icons/'):
             return 'public, max-age=604800'
-        if name in {'main.dart.js', 'flutter.js'}:
-            return 'public, max-age=3600, must-revalidate'
         return 'public, max-age=3600'
 
     def do_OPTIONS(self) -> None:
