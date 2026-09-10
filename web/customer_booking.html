@@ -271,6 +271,33 @@
       margin-bottom: 14px;
     }
 
+    .policy-cards {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .policy-card {
+      border: 1px solid rgba(110, 29, 50, 0.16);
+      border-radius: 18px;
+      background: white;
+      padding: 14px;
+    }
+
+    .policy-card h3 {
+      margin: 0 0 8px;
+      color: var(--maroon);
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .policy-card p {
+      margin: 0;
+      color: var(--ink);
+      line-height: 1.75;
+      white-space: pre-line;
+    }
+
     .agreement {
       display: flex;
       align-items: flex-start;
@@ -520,12 +547,7 @@
           </div>
           <div class="full policy-gate" id="policyGate">
             <h2 data-i18n="policyTitle">السياسات قبل الدفع</h2>
-            <ul class="policy-list">
-              <li data-i18n="policy1">يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.</li>
-              <li data-i18n="policy2">ينتقل العميل إلى الدفع فقط بعد الموافقة.</li>
-              <li data-i18n="policy3">يتم حفظ الحجز فقط بعد نجاح الدفع.</li>
-              <li data-i18n="policy4">يجب حجز الموعد قبل 3 ساعات على الأقل.</li>
-            </ul>
+            <div class="policy-cards" id="fullPolicyList"></div>
             <label class="agreement" for="policyAgree">
               <input id="policyAgree" type="checkbox" required>
               <span data-i18n="agreePolicy">قرأت السياسات وأوافق عليها قبل الانتقال للدفع.</span>
@@ -652,6 +674,99 @@
       lockedSubmit: 'Agree to policies to continue to payment'
     });
 
+    const policyRecords = [
+      {
+        nameEn: 'Alteration & Repair',
+        nameAr: 'التعديلات والإصلاحات',
+        detailEn: `Thank you for choosing Tailor Express home service.
+
+We are happy to serve you and we trust you will find quality and speed in our service.
+
+Dear customer, please review the services and measurements shown on the invoice and confirm that all registered information is correct.
+
+Home service fees include one visit only.
+
+If an adjustment is needed for the same service, we will be happy to receive you at one of our branches for one free adjustment within 7 days from the receiving date.
+
+When the team arrives at the scheduled appointment, waiting time is limited to 10 minutes only. If no one is available, the team may leave and the paid amount is non-refundable.
+
+Visit rescheduling must be requested at least 3 hours before the appointment.`,
+        detailAr: `شكراً لاختياركم خدمة تيلور اكسبرس المنزلية.
+
+نسعد بخدمتكم ونثق بأنكم ستجدون الجودة والسرعة في خدماتنا.
+
+عزيزنا العميل، يرجى مراجعة الخدمات والمقاسات الموضحة في الفاتورة والتأكد من صحة جميع المعلومات المسجلة.
+
+رسوم الخدمة المنزلية تشمل زيارة واحدة فقط.
+
+في حال الحاجة للتعديل على نفس الخدمة، يسعدنا استقبالكم في أحد فروعنا لإجراء تعديل مجاناً خلال 7 أيام من تاريخ الاستلام.
+
+عند وصول الفريق في الموعد المحدد يمكن الانتظار 10 دقائق فقط، وفي حال عدم التواجد يحق للفريق المغادرة ويعتبر المبلغ غير مسترد.
+
+تغيير موعد الزيارة يجب أن يكون قبل الموعد بـ 3 ساعات على الأقل.`
+      },
+      {
+        nameEn: 'Order Cancellation',
+        nameAr: 'إلغاء الطلب',
+        detailEn: `Acceptance of the invoice confirms the customer's agreement to all services, measurements, pricing, and policies.
+
+Payments are made in advance, and once tailoring or repair work has begun, order cancellations are not permitted.
+
+In the event of service delays, cancellations are not allowed under any circumstances.`,
+        detailAr: `يعد قبول الفاتورة إقراراً من العميل بالموافقة على جميع الخدمات والمقاسات والأسعار والسياسات المعتمدة.
+
+تسدد الدفعات مقدماً، وبمجرد البدء في أعمال الخياطة أو الإصلاح، لا يسمح بإلغاء الطلب.
+
+في حال حدوث أي تأخير في تنفيذ الخدمة، لا يسمح بالإلغاء تحت أي ظرف من الظروف.`
+      },
+      {
+        nameEn: 'Appointment Rescheduling',
+        nameAr: 'إعادة جدولة المواعيد',
+        detailEn: `For home services, the customer will receive a confirmation link to confirm the appointment.
+
+A fixed home services fee applies and is determined by location.
+
+Appointments may be cancelled or rescheduled only if the request is made at least 3 hours before the scheduled time.
+
+Requests made after this period will not be eligible for changes or fee refunds.`,
+        detailAr: `في حال طلب خدمة منزلية، سيستلم العميل رابط تأكيد لتأكيد الموعد.
+
+يتم تطبيق رسوم ثابتة للخدمة المنزلية، ويتم تحديدها حسب الموقع.
+
+يمكن إلغاء الموعد أو إعادة جدولته فقط في حال تقديم الطلب قبل 3 ساعات على الأقل من الوقت المحدد.
+
+الطلبات المقدمة بعد هذه المدة لن تكون مؤهلة للتعديل أو استرداد الرسوم.`
+      },
+      {
+        nameEn: 'Delivery & Pickup',
+        nameAr: 'التوصيل والاستلام',
+        detailEn: `Customers are responsible for collecting their items from the company's branches once services are completed.
+
+The expected completion time may range from 15 minutes to two weeks, depending on the type and volume of services. Timelines may change without prior notice due to circumstances beyond the company's control.
+
+The company disclaims all responsibility for any items that are not collected within 7 days from the completion or notification date.`,
+        detailAr: `يتحمل العملاء مسؤولية استلام قطعهم من فروع الشركة بعد إتمام الخدمات.
+
+قد تتراوح مدة الإنجاز المتوقعة من 15 دقيقة إلى أسبوعين، وذلك بحسب نوع وحجم الخدمة، وقد تتغير المدة دون إشعار مسبق بسبب ظروف خارجة عن إرادة الشركة.
+
+تخلي الشركة مسؤوليتها عن أي قطع لم يتم استلامها خلال 7 أيام من تاريخ الإنجاز أو الإخطار.`
+      },
+      {
+        nameEn: 'Refund',
+        nameAr: 'استرداد المبالغ',
+        detailEn: `All service fees are non-refundable under any circumstances, including alterations, repairs, tailoring, delays, or unintentional damage.
+
+The company does not provide compensation for the original value of items.
+
+Home service fees are also non-refundable, except in cases where the appointment is cancelled at least three hours before the scheduled time.`,
+        detailAr: `جميع رسوم الخدمات غير قابلة للاسترداد تحت أي ظرف من الظروف، بما في ذلك التعديلات والإصلاحات والخياطة والتأخير أو التلف غير المقصود.
+
+لا تتحمل الشركة مسؤولية أو تعويض القيمة الأصلية للقطع.
+
+رسوم الخدمة المنزلية غير قابلة للاسترداد أيضاً، باستثناء الحالات التي يتم فيها إلغاء الموعد قبل ثلاث ساعات على الأقل من الوقت المحدد.`
+      }
+    ];
+
     let lang = localStorage.getItem('tailor_public_lang') || 'ar';
     let areas = [];
     let schedule = { enabled: true, slots: fallbackSlots, rows: [] };
@@ -670,10 +785,26 @@
         node.placeholder = t(node.dataset.i18nPlaceholder);
       });
       el('langButton').textContent = lang === 'ar' ? 'English' : 'العربية';
+      renderPolicies();
       renderServiceOptions();
       renderPreferenceOptions();
       updateSubmitState();
       localStorage.setItem('tailor_public_lang', lang);
+    }
+
+    function renderPolicies() {
+      const list = el('fullPolicyList');
+      list.textContent = '';
+      policyRecords.forEach((policy) => {
+        const card = document.createElement('article');
+        card.className = 'policy-card';
+        const title = document.createElement('h3');
+        title.textContent = lang === 'ar' ? policy.nameAr : policy.nameEn;
+        const detail = document.createElement('p');
+        detail.textContent = lang === 'ar' ? policy.detailAr : policy.detailEn;
+        card.append(title, detail);
+        list.append(card);
+      });
     }
 
     function updateSubmitState() {
