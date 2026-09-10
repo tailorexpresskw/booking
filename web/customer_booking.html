@@ -254,6 +254,45 @@
       line-height: 1.9;
     }
 
+    .policy-gate {
+      margin-top: 4px;
+      border: 1.3px solid var(--line);
+      border-radius: 22px;
+      background: #fffaf2;
+      padding: 18px;
+    }
+
+    .policy-gate h2 {
+      margin-bottom: 12px;
+      font-size: clamp(22px, 4vw, 30px);
+    }
+
+    .policy-gate .policy-list {
+      margin-bottom: 14px;
+    }
+
+    .agreement {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 700;
+      line-height: 1.6;
+    }
+
+    .agreement input {
+      width: 22px;
+      height: 22px;
+      min-height: 0;
+      margin: 4px 0 0;
+      padding: 0;
+      flex: 0 0 22px;
+      accent-color: var(--maroon);
+    }
+
     .track-box {
       margin-top: 18px;
       display: flex;
@@ -362,6 +401,11 @@
 
       .form-grid {
         gap: 13px;
+      }
+
+      .policy-gate {
+        border-radius: 20px;
+        padding: 15px;
       }
 
       input,
@@ -474,8 +518,21 @@
             <label for="notes" data-i18n="notes">ملاحظات</label>
             <textarea id="notes" name="notes"></textarea>
           </div>
+          <div class="full policy-gate" id="policyGate">
+            <h2 data-i18n="policyTitle">السياسات قبل الدفع</h2>
+            <ul class="policy-list">
+              <li data-i18n="policy1">يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.</li>
+              <li data-i18n="policy2">ينتقل العميل إلى الدفع فقط بعد الموافقة.</li>
+              <li data-i18n="policy3">يتم حفظ الحجز فقط بعد نجاح الدفع.</li>
+              <li data-i18n="policy4">يجب حجز الموعد قبل 3 ساعات على الأقل.</li>
+            </ul>
+            <label class="agreement" for="policyAgree">
+              <input id="policyAgree" type="checkbox" required>
+              <span data-i18n="agreePolicy">قرأت السياسات وأوافق عليها قبل الانتقال للدفع.</span>
+            </label>
+          </div>
         </div>
-        <button class="primary" id="submitButton" type="submit" data-i18n="submit">راجع السياسة وانتقل للدفع</button>
+        <button class="primary" id="submitButton" type="submit" data-i18n="lockedSubmit" disabled>وافق على السياسات للانتقال للدفع</button>
         <div class="status" id="statusBox"></div>
       </form>
 
@@ -582,6 +639,19 @@
       }
     };
 
+    Object.assign(translations.ar, {
+      policyTitle: '\u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0642\u0628\u0644 \u0627\u0644\u062f\u0641\u0639',
+      agreePolicy: '\u0642\u0631\u0623\u062a \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0648\u0623\u0648\u0627\u0641\u0642 \u0639\u0644\u064a\u0647\u0627 \u0642\u0628\u0644 \u0627\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0644\u0644\u062f\u0641\u0639.',
+      agreeRequired: '\u064a\u062c\u0628 \u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0639\u0644\u0649 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0642\u0628\u0644 \u0627\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0644\u0644\u062f\u0641\u0639.',
+      lockedSubmit: '\u0648\u0627\u0641\u0642 \u0639\u0644\u0649 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0644\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0644\u0644\u062f\u0641\u0639'
+    });
+    Object.assign(translations.en, {
+      policyTitle: 'Policies before payment',
+      agreePolicy: 'I have read and agree to these policies before payment.',
+      agreeRequired: 'You must agree to the policies before continuing to payment.',
+      lockedSubmit: 'Agree to policies to continue to payment'
+    });
+
     let lang = localStorage.getItem('tailor_public_lang') || 'ar';
     let areas = [];
     let schedule = { enabled: true, slots: fallbackSlots, rows: [] };
@@ -602,7 +672,17 @@
       el('langButton').textContent = lang === 'ar' ? 'English' : 'العربية';
       renderServiceOptions();
       renderPreferenceOptions();
+      updateSubmitState();
       localStorage.setItem('tailor_public_lang', lang);
+    }
+
+    function updateSubmitState() {
+      const button = el('submitButton');
+      const agreed = el('policyAgree').checked;
+      if (button.dataset.loading === 'true') return;
+      button.disabled = !agreed;
+      button.textContent = agreed ? t('submit') : t('lockedSubmit');
+      button.dataset.i18n = agreed ? 'submit' : 'lockedSubmit';
     }
 
     function renderServiceOptions() {
@@ -756,6 +836,11 @@
         showStatus(t('noSlot'));
         return;
       }
+      if (!el('policyAgree').checked) {
+        showStatus(t('agreeRequired'));
+        el('policyGate').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
       if (!confirm(t('confirm'))) return;
 
       const selectedGatewaySrc = el('paymentMethod').value;
@@ -785,6 +870,7 @@
 
       el('submitButton').disabled = true;
       el('submitButton').textContent = t('loading');
+      el('submitButton').dataset.loading = 'true';
       try {
         const response = await fetch('/api/payments/create', {
           method: 'POST',
@@ -812,8 +898,8 @@
         window.location.assign(body.paymentUrl);
       } catch (error) {
         showStatus(`${t('failed')} ${error.message || ''}`.trim());
-        el('submitButton').disabled = false;
-        el('submitButton').textContent = t('submit');
+        delete el('submitButton').dataset.loading;
+        updateSubmitState();
       }
     }
 
@@ -824,6 +910,7 @@
     el('areaFilter').addEventListener('input', renderAreas);
     el('areaSelect').addEventListener('change', updateAmount);
     el('visitDate').addEventListener('change', renderSlots);
+    el('policyAgree').addEventListener('change', updateSubmitState);
     el('trackButton').addEventListener('click', () => {
       const id = el('trackInput').value.trim();
       window.location.href = id ? `/track?order=${encodeURIComponent(id)}` : '/track';
