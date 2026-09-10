@@ -2459,7 +2459,7 @@ class TailorWebApp extends StatelessWidget {
         paymentFailed: uri.queryParameters['payment'] == 'failed',
       );
     }
-    if (path == '/track') {
+    if (path == '/track' || path == '/track-app') {
       state.ensurePublicDefaultArabic();
       return TrackPage(
           state: state,

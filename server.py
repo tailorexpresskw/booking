@@ -653,6 +653,24 @@ def public_staff_user(user: dict) -> dict:
     return normalize_staff_user(user, include_password=False)
 
 
+def public_order(order: dict) -> dict:
+    normalized = normalize_order(dict(order))
+    return {
+        'id': str(normalized.get('id', '')).strip(),
+        'invoiceNo': str(normalized.get('invoiceNo', '')).strip(),
+        'areaEn': str(normalized.get('areaEn', '')).strip(),
+        'areaAr': str(normalized.get('areaAr', '')).strip(),
+        'service': str(normalized.get('service', '')).strip(),
+        'preference': str(normalized.get('preference', '')).strip(),
+        'window': str(normalized.get('window', '')).strip(),
+        'stage': str(normalized.get('stage', '')).strip(),
+        'paymentStatus': str(normalized.get('paymentStatus', '')).strip(),
+        'deliveryPrice': normalized.get('deliveryPrice', 0),
+        'totalAmount': normalized.get('totalAmount', 0),
+        'cancelReason': str(normalized.get('cancelReason', '')).strip(),
+    }
+
+
 def load_staff_users() -> list[dict]:
     ensure_storage()
     with STORE_LOCK:
@@ -1628,6 +1646,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if name in {
             'index.html',
             'customer_booking.html',
+            'customer_tracking.html',
             'flutter_bootstrap.js',
             'version.json',
             'sw.js',
@@ -1719,6 +1738,19 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self._send_json(status)
             return
 
+        public_order_match = re.fullmatch(r'/api/orders/([^/]+)/public', parsed.path)
+        if public_order_match:
+            order_id = unquote(public_order_match.group(1)).strip()
+            order = next(
+                (item for item in load_orders() if str(item.get('id', '')).strip().lower() == order_id.lower()),
+                None,
+            )
+            if order is None:
+                self._send_json({'error': 'Order not found'}, status=404)
+                return
+            self._send_json(public_order(order))
+            return
+
         if parsed.path == '/flutter_service_worker.js':
             self.path = '/sw.js'
 
@@ -1733,11 +1765,17 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self.path = '/customer_booking.html'
             elif parsed.path == '/booking':
                 self.path = '/customer_booking.html'
+            elif parsed.path == '/track':
+                self.path = '/customer_tracking.html'
             elif not candidate.exists() or candidate.is_dir():
                 self.path = '/index.html'
         if self.path == '/customer_booking.html':
             candidate = (WEB_ROOT / 'customer_booking.html').resolve()
             if not candidate.exists() and self._send_source_web_file('customer_booking.html'):
+                return
+        if self.path == '/customer_tracking.html':
+            candidate = (WEB_ROOT / 'customer_tracking.html').resolve()
+            if not candidate.exists() and self._send_source_web_file('customer_tracking.html'):
                 return
         self._cache_control = self._static_cache_control(urlparse(self.path).path)
         super().do_GET()
