@@ -2468,11 +2468,14 @@ class TailorWebApp extends StatelessWidget {
           paymentParams: uri.queryParameters);
     }
     if (path.startsWith('/payment/return/') ||
-        path.startsWith('/payment/cancel/')) {
+        path.startsWith('/payment/cancel/') ||
+        path.startsWith('/payment/return-app/') ||
+        path.startsWith('/payment/cancel-app/')) {
       state.ensurePublicDefaultArabic();
       final segments = uri.pathSegments;
-      final result =
-          segments.length > 1 && segments[1] == 'return' ? 'return' : 'failed';
+      final result = segments.length > 1 && segments[1].startsWith('return')
+          ? 'return'
+          : 'failed';
       final draftId = segments.length > 2 ? segments[2] : '';
       final returnToken = segments.length > 3 ? segments[3] : '';
       final params = <String, String>{

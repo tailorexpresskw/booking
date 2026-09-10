@@ -1647,6 +1647,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
             'index.html',
             'customer_booking.html',
             'customer_tracking.html',
+            'payment_result.html',
             'flutter_bootstrap.js',
             'version.json',
             'sw.js',
@@ -1767,6 +1768,8 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self.path = '/customer_booking.html'
             elif parsed.path == '/track':
                 self.path = '/customer_tracking.html'
+            elif parsed.path.startswith('/payment/return/') or parsed.path.startswith('/payment/cancel/'):
+                self.path = '/payment_result.html'
             elif not candidate.exists() or candidate.is_dir():
                 self.path = '/index.html'
         if self.path == '/customer_booking.html':
@@ -1776,6 +1779,10 @@ class TailorHandler(SimpleHTTPRequestHandler):
         if self.path == '/customer_tracking.html':
             candidate = (WEB_ROOT / 'customer_tracking.html').resolve()
             if not candidate.exists() and self._send_source_web_file('customer_tracking.html'):
+                return
+        if self.path == '/payment_result.html':
+            candidate = (WEB_ROOT / 'payment_result.html').resolve()
+            if not candidate.exists() and self._send_source_web_file('payment_result.html'):
                 return
         self._cache_control = self._static_cache_control(urlparse(self.path).path)
         super().do_GET()
