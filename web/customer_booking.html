@@ -262,8 +262,16 @@
       padding: 18px;
     }
 
-    .policy-gate h2 {
+    .policy-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       margin-bottom: 12px;
+    }
+
+    .policy-gate h2 {
+      margin: 0;
       font-size: clamp(22px, 4vw, 30px);
     }
 
@@ -271,10 +279,21 @@
       margin-bottom: 14px;
     }
 
+    .policy-toggle {
+      min-height: 42px;
+      padding: 8px 16px;
+      flex: 0 0 auto;
+      background: white;
+    }
+
     .policy-cards {
       display: grid;
       gap: 12px;
       margin-bottom: 14px;
+    }
+
+    .policy-cards[hidden] {
+      display: none;
     }
 
     .policy-card {
@@ -435,6 +454,15 @@
         padding: 15px;
       }
 
+      .policy-header {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .policy-toggle {
+        width: 100%;
+      }
+
       input,
       select,
       textarea,
@@ -546,8 +574,11 @@
             <textarea id="notes" name="notes"></textarea>
           </div>
           <div class="full policy-gate" id="policyGate">
-            <h2 data-i18n="policyTitle">السياسات قبل الدفع</h2>
-            <div class="policy-cards" id="fullPolicyList"></div>
+            <div class="policy-header">
+              <h2 data-i18n="policyTitle">السياسات قبل الدفع</h2>
+              <button class="policy-toggle" id="policyToggle" type="button" aria-expanded="false" aria-controls="fullPolicyList" data-i18n="showPolicies">عرض السياسات</button>
+            </div>
+            <div class="policy-cards" id="fullPolicyList" hidden></div>
             <label class="agreement" for="policyAgree">
               <input id="policyAgree" type="checkbox" required>
               <span data-i18n="agreePolicy">قرأت السياسات وأوافق عليها قبل الانتقال للدفع.</span>
@@ -662,13 +693,17 @@
       policyTitle: '\u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0642\u0628\u0644 \u0627\u0644\u062f\u0641\u0639',
       agreePolicy: '\u0642\u0631\u0623\u062a \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0648\u0623\u0648\u0627\u0641\u0642 \u0639\u0644\u064a\u0647\u0627 \u0642\u0628\u0644 \u0627\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0644\u0644\u062f\u0641\u0639.',
       agreeRequired: '\u064a\u062c\u0628 \u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0639\u0644\u0649 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0642\u0628\u0644 \u0627\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0644\u0644\u062f\u0641\u0639.',
-      lockedSubmit: '\u0648\u0627\u0641\u0642 \u0639\u0644\u0649 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0644\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0644\u0644\u062f\u0641\u0639'
+      lockedSubmit: '\u0648\u0627\u0641\u0642 \u0639\u0644\u0649 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0644\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0644\u0644\u062f\u0641\u0639',
+      showPolicies: '\u0639\u0631\u0636 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a',
+      hidePolicies: '\u0625\u062e\u0641\u0627\u0621 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a'
     });
     Object.assign(translations.en, {
       policyTitle: 'Policies before payment',
       agreePolicy: 'I have read and agree to these policies before payment.',
       agreeRequired: 'You must agree to the policies before continuing to payment.',
-      lockedSubmit: 'Agree to policies to continue to payment'
+      lockedSubmit: 'Agree to policies to continue to payment',
+      showPolicies: 'Show policies',
+      hidePolicies: 'Hide policies'
     });
 
     const policyRecords = [
@@ -765,6 +800,7 @@ Home service fees are also non-refundable, except in cases where the appointment
     ];
 
     let lang = localStorage.getItem('tailor_public_lang') || 'ar';
+    let policiesOpen = false;
     let areas = [];
     let schedule = { enabled: true, slots: fallbackSlots, rows: [] };
 
@@ -783,10 +819,22 @@ Home service fees are also non-refundable, except in cases where the appointment
       });
       el('langButton').textContent = lang === 'ar' ? 'English' : 'العربية';
       renderPolicies();
+      updatePolicyToggle();
       renderServiceOptions();
       renderPreferenceOptions();
       updateSubmitState();
       localStorage.setItem('tailor_public_lang', lang);
+    }
+
+    function updatePolicyToggle() {
+      el('fullPolicyList').hidden = !policiesOpen;
+      el('policyToggle').setAttribute('aria-expanded', String(policiesOpen));
+      el('policyToggle').textContent = t(policiesOpen ? 'hidePolicies' : 'showPolicies');
+    }
+
+    function togglePolicies() {
+      policiesOpen = !policiesOpen;
+      updatePolicyToggle();
     }
 
     function renderPolicies() {
@@ -1038,6 +1086,7 @@ Home service fees are also non-refundable, except in cases where the appointment
     el('areaFilter').addEventListener('input', renderAreas);
     el('areaSelect').addEventListener('change', updateAmount);
     el('visitDate').addEventListener('change', renderSlots);
+    el('policyToggle').addEventListener('click', togglePolicies);
     el('policyAgree').addEventListener('change', updateSubmitState);
     el('trackButton').addEventListener('click', () => {
       const id = el('trackInput').value.trim();
