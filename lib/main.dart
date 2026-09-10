@@ -2451,7 +2451,7 @@ class TailorWebApp extends StatelessWidget {
 
   Widget routeFor(Uri uri) {
     final path = uri.path.isEmpty ? '/' : uri.path;
-    if (path == '/' || path == '/booking') {
+    if (path == '/' || path == '/booking' || path == '/booking-app') {
       state.ensurePublicDefaultArabic();
       return BookingPage(
         state: state,
