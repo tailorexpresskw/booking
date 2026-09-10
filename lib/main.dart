@@ -944,10 +944,15 @@ class AppState extends ChangeNotifier {
     _loadAreaPrices();
     _loadBookingSchedule();
     _loadOrders();
-    unawaited(refreshStaffUsers());
+    final staffRoute = _isStaffRoute();
+    if (staffRoute || signedIn) {
+      unawaited(refreshStaffUsers());
+    }
     unawaited(refreshAreaPrices());
     unawaited(refreshBookingSchedule(quiet: true));
-    unawaited(refreshOrders());
+    if (staffRoute || signedIn) {
+      unawaited(refreshOrders());
+    }
     _poller = Timer.periodic(const Duration(seconds: 20), (_) {
       if (signedIn) {
         unawaited(refreshOrders(quiet: true));
@@ -980,6 +985,13 @@ class AppState extends ChangeNotifier {
   bool get signedIn => role != null;
   bool get browserNotificationsEnabled => notificationPermission == 'granted';
 
+  bool _isStaffRoute() {
+    final path = html.window.location.pathname ?? '';
+    return path.startsWith('/staff') ||
+        path.startsWith('/admin') ||
+        path.startsWith('/login/staff');
+  }
+
   void _setCurrentStaff(StaffUser staff, {bool persist = true}) {
     currentStaff = staff;
     role = staff.role;
@@ -1006,7 +1018,6 @@ class AppState extends ChangeNotifier {
         return;
       }
     }
-    _clearStaffSession();
   }
 
   void _syncCurrentStaffFromUsers() {
@@ -1139,7 +1150,11 @@ class AppState extends ChangeNotifier {
             .whereType<StaffUser>());
       if (staffUsers.isEmpty) staffUsers.addAll(defaultStaffUsers);
       _saveStaffUsers();
-      _syncCurrentStaffFromUsers();
+      if (currentStaff == null) {
+        _restoreStaffSession();
+      } else {
+        _syncCurrentStaffFromUsers();
+      }
       notifyListeners();
     } catch (_) {}
   }

@@ -1618,15 +1618,27 @@ class TailorHandler(SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS')
-        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Cache-Control', getattr(self, '_cache_control', 'no-store'))
         super().end_headers()
 
+    def _static_cache_control(self, path: str) -> str:
+        name = path.rsplit('/', 1)[-1].lower()
+        if name in {'index.html', 'flutter_bootstrap.js', 'version.json', 'sw.js'}:
+            return 'no-cache'
+        if path.startswith('/assets/') or path.startswith('/canvaskit/') or path.startswith('/icons/'):
+            return 'public, max-age=604800'
+        if name in {'main.dart.js', 'flutter.js'}:
+            return 'public, max-age=3600, must-revalidate'
+        return 'public, max-age=3600'
+
     def do_OPTIONS(self) -> None:
+        self._cache_control = 'no-store'
         self.send_response(204)
         self.end_headers()
 
     def _send_json(self, payload: object, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self._cache_control = 'no-store'
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
@@ -1693,6 +1705,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self.path = '/index.html'
             elif not candidate.exists() or candidate.is_dir():
                 self.path = '/index.html'
+        self._cache_control = self._static_cache_control(urlparse(self.path).path)
         super().do_GET()
 
     def do_POST(self) -> None:
