@@ -1719,6 +1719,9 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self._send_json(status)
             return
 
+        if parsed.path == '/flutter_service_worker.js':
+            self.path = '/sw.js'
+
         if WEB_ROOT.exists():
             candidate = (WEB_ROOT / parsed.path.lstrip('/')).resolve()
             try:
