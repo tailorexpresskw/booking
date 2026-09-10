@@ -180,6 +180,10 @@
       box-shadow: 0 0 0 3px rgba(110, 29, 50, 0.08);
     }
 
+    #areaFilter {
+      margin-bottom: 10px;
+    }
+
     textarea {
       min-height: 120px;
       resize: vertical;
@@ -320,9 +324,9 @@
             <input id="mobile" name="mobile" required inputmode="numeric" pattern="[0-9]{8}" maxlength="8">
           </div>
           <div class="full">
-            <label for="areaSearch" data-i18n="area">المنطقة</label>
-            <input id="areaSearch" name="areaSearch" list="areaList" required autocomplete="off">
-            <datalist id="areaList"></datalist>
+            <label for="areaSelect" data-i18n="area">المنطقة</label>
+            <input id="areaFilter" name="areaFilter" data-i18n-placeholder="areaSearch" autocomplete="off">
+            <select id="areaSelect" name="areaSelect" required></select>
           </div>
           <div>
             <label for="block" data-i18n="block">قطعة</label>
@@ -414,6 +418,7 @@
         customer: 'اسم العميل',
         mobile: 'رقم الهاتف',
         area: 'المنطقة',
+        areaSearch: 'ابحث عن المنطقة',
         block: 'قطعة',
         street: 'شارع',
         building: 'مبنى / منزل',
@@ -446,6 +451,7 @@
         customer: 'Customer name',
         mobile: 'Phone number',
         area: 'Area',
+        areaSearch: 'Search area',
         block: 'Block',
         street: 'Street',
         building: 'Building / house',
@@ -486,6 +492,9 @@
       document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
       document.querySelectorAll('[data-i18n]').forEach((node) => {
         node.textContent = t(node.dataset.i18n);
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach((node) => {
+        node.placeholder = t(node.dataset.i18nPlaceholder);
       });
       el('langButton').textContent = lang === 'ar' ? 'English' : 'العربية';
       renderServiceOptions();
@@ -550,17 +559,23 @@
     }
 
     function renderAreas() {
-      const list = el('areaList');
-      list.innerHTML = areas.map((area) =>
+      const current = el('areaSelect').value;
+      const filter = el('areaFilter').value.trim().toLowerCase();
+      const filtered = areas.filter((area) =>
+        !filter || area.areaEn.toLowerCase().includes(filter));
+      const visibleAreas = filtered.length ? filtered : areas;
+      el('areaSelect').innerHTML = visibleAreas.map((area) =>
         `<option value="${area.areaEn}">${area.areaEn} - ${money(area.price)}</option>`).join('');
-      if (!el('areaSearch').value && areas[0]) {
-        el('areaSearch').value = areas[0].areaEn;
+      if (visibleAreas.some((area) => area.areaEn === current)) {
+        el('areaSelect').value = current;
+      } else if (visibleAreas[0]) {
+        el('areaSelect').value = visibleAreas[0].areaEn;
       }
       updateAmount();
     }
 
     function selectedArea() {
-      const value = el('areaSearch').value.trim().toLowerCase();
+      const value = el('areaSelect').value.trim().toLowerCase();
       return areas.find((area) => area.areaEn.toLowerCase() === value);
     }
 
@@ -703,7 +718,8 @@
       lang = lang === 'ar' ? 'en' : 'ar';
       applyLanguage();
     });
-    el('areaSearch').addEventListener('input', updateAmount);
+    el('areaFilter').addEventListener('input', renderAreas);
+    el('areaSelect').addEventListener('change', updateAmount);
     el('visitDate').addEventListener('change', renderSlots);
     el('trackButton').addEventListener('click', () => {
       const id = el('trackInput').value.trim();
