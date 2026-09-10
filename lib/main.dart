@@ -2493,7 +2493,10 @@ class TailorWebApp extends StatelessWidget {
     }
     if (path == '/staff') {
       state.enterStaffArea();
-      return StaffHubPage(state: state);
+      if (state.signedIn && state.role != null) {
+        return DashboardPage(state: state, role: state.role!);
+      }
+      return LoginPage(state: state);
     }
     if (path == '/login' ||
         path == '/login/staff' ||

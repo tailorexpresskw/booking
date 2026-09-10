@@ -1648,6 +1648,8 @@ class TailorHandler(SimpleHTTPRequestHandler):
             'customer_booking.html',
             'customer_tracking.html',
             'payment_result.html',
+            'manifest.json',
+            'customer_manifest.json',
             'flutter_bootstrap.js',
             'version.json',
             'sw.js',
@@ -1754,6 +1756,10 @@ class TailorHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == '/flutter_service_worker.js':
             self.path = '/sw.js'
+
+        if parsed.path in ('/manifest.json', '/customer_manifest.json'):
+            if self._send_source_web_file(parsed.path.lstrip('/')):
+                return
 
         if WEB_ROOT.exists():
             candidate = (WEB_ROOT / parsed.path.lstrip('/')).resolve()

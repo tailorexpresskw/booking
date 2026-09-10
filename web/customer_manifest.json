@@ -1,8 +1,8 @@
 {
-  "name": "Tailor Express Staff",
-  "short_name": "TE Staff",
-  "description": "Tailor Express staff dashboard.",
-  "start_url": "/login/staff?app=staff",
+  "name": "Tailor Express Booking",
+  "short_name": "Tailor Express",
+  "description": "Tailor Express customer booking and tracking.",
+  "start_url": "/booking",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
