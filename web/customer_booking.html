@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#6E1D32">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Tailor Express">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/tailor-logo-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/tailor-logo-192.png">
+  <title>Tailor Express Booking</title>
+  <style>
+    :root {
+      --maroon: #6e1d32;
+      --maroon-dark: #3a0d18;
+      --sand: #faf5ea;
+      --card: #fffdf8;
+      --line: #ead8bc;
+      --ink: #24191c;
+      --muted: #766a67;
+      --danger: #9b1c38;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(110, 29, 50, 0.08), transparent 28%),
+        linear-gradient(180deg, #fffaf0 0%, var(--sand) 100%);
+      color: var(--ink);
+      font-family: Arial, Tahoma, sans-serif;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px clamp(16px, 5vw, 52px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--maroon);
+      font-size: clamp(22px, 4vw, 34px);
+      font-weight: 500;
+      direction: ltr;
+    }
+
+    .brand img {
+      width: 46px;
+      height: 46px;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    button,
+    .link-button {
+      border: 1.5px solid rgba(110, 29, 50, 0.65);
+      border-radius: 999px;
+      background: #fffaf2;
+      color: var(--maroon);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      min-height: 46px;
+      padding: 10px 20px;
+      text-decoration: none;
+    }
+
+    main {
+      padding: 0 clamp(14px, 4vw, 52px) 36px;
+    }
+
+    .hero {
+      margin-bottom: 28px;
+      padding: clamp(28px, 5vw, 44px);
+      border-radius: 0 0 34px 34px;
+      background: linear-gradient(110deg, var(--maroon) 0%, var(--maroon-dark) 100%);
+      color: white;
+    }
+
+    .hero-pill {
+      width: min(540px, 100%);
+      margin-inline-start: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      border-radius: 999px;
+      background: white;
+      color: var(--maroon);
+      padding: 16px 24px;
+      direction: ltr;
+      font-size: clamp(26px, 5vw, 44px);
+    }
+
+    .hero-pill img {
+      width: 68px;
+      height: 68px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: rgba(255, 253, 248, 0.9);
+      box-shadow: 0 12px 30px rgba(77, 42, 29, 0.06);
+      padding: clamp(20px, 4vw, 34px);
+    }
+
+    h1,
+    h2 {
+      margin: 0 0 20px;
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    h1 {
+      font-size: clamp(30px, 5vw, 46px);
+    }
+
+    h2 {
+      font-size: clamp(24px, 4vw, 34px);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0 12px 6px;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      min-height: 58px;
+      border: 1.3px solid var(--line);
+      border-radius: 20px;
+      background: white;
+      color: var(--ink);
+      font: inherit;
+      font-size: 19px;
+      padding: 12px 18px;
+      outline: none;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--maroon);
+      box-shadow: 0 0 0 3px rgba(110, 29, 50, 0.08);
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .full {
+      grid-column: 1 / -1;
+    }
+
+    .amount {
+      display: grid;
+      place-items: center;
+      min-height: 58px;
+      border: 1.3px solid var(--line);
+      border-radius: 20px;
+      background: white;
+      font-size: 22px;
+      font-weight: 700;
+      direction: ltr;
+    }
+
+    .primary {
+      width: 100%;
+      margin-top: 18px;
+      min-height: 62px;
+      border: 0;
+      background: var(--maroon);
+      color: white;
+      font-size: 22px;
+      box-shadow: 0 8px 18px rgba(78, 17, 33, 0.22);
+    }
+
+    .primary:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    .note {
+      margin-top: 14px;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .status {
+      display: none;
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: #f5e7e9;
+      color: var(--danger);
+      font-weight: 700;
+      line-height: 1.6;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .policy-list {
+      margin: 0;
+      padding-inline-start: 22px;
+      color: var(--muted);
+      line-height: 1.9;
+    }
+
+    .track-box {
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .track-box input {
+      direction: ltr;
+    }
+
+    .track-box button {
+      min-width: 90px;
+      background: var(--maroon);
+      color: white;
+      border-color: var(--maroon);
+    }
+
+    @media (max-width: 900px) {
+      header {
+        align-items: flex-start;
+        flex-direction: column-reverse;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        margin-inline: -14px;
+        border-radius: 0 0 28px 28px;
+      }
+
+      .hero-pill {
+        margin: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="top-actions">
+      <button type="button" id="langButton">EN / AR</button>
+      <a class="link-button" href="/track" data-i18n="trackLink">تتبع الطلب</a>
+      <a class="link-button" href="/login/staff" data-i18n="staffLink">دخول الموظفين</a>
+    </nav>
+    <div class="brand">
+      <img src="icons/tailor-logo-192.png" alt="">
+      <span>Tailor Express</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-pill">
+        <img src="icons/tailor-logo-192.png" alt="">
+        <span>Tailor Express</span>
+      </div>
+    </section>
+
+    <section class="grid">
+      <form id="bookingForm" class="card" autocomplete="on">
+        <h1 data-i18n="title">احجز زيارة منزلية</h1>
+        <div class="form-grid">
+          <div>
+            <label for="customer" data-i18n="customer">اسم العميل</label>
+            <input id="customer" name="customer" required>
+          </div>
+          <div>
+            <label for="mobile" data-i18n="mobile">رقم الهاتف</label>
+            <input id="mobile" name="mobile" required inputmode="numeric" pattern="[0-9]{8}" maxlength="8">
+          </div>
+          <div class="full">
+            <label for="areaSearch" data-i18n="area">المنطقة</label>
+            <input id="areaSearch" name="areaSearch" list="areaList" required autocomplete="off">
+            <datalist id="areaList"></datalist>
+          </div>
+          <div>
+            <label for="block" data-i18n="block">قطعة</label>
+            <input id="block" name="block" required>
+          </div>
+          <div>
+            <label for="street" data-i18n="street">شارع</label>
+            <input id="street" name="street" required>
+          </div>
+          <div>
+            <label for="building" data-i18n="building">مبنى / منزل</label>
+            <input id="building" name="building" required>
+          </div>
+          <div>
+            <label data-i18n="price">سعر التوصيل</label>
+            <div class="amount" id="amount">KD 0.000</div>
+          </div>
+          <div>
+            <label for="service" data-i18n="service">الخدمة</label>
+            <select id="service" name="service"></select>
+          </div>
+          <div>
+            <label for="preference" data-i18n="preference">تفضيل الخياط</label>
+            <select id="preference" name="preference"></select>
+          </div>
+          <div>
+            <label for="visitDate" data-i18n="date">يوم الزيارة</label>
+            <select id="visitDate" name="visitDate" required></select>
+          </div>
+          <div>
+            <label for="visitSlot" data-i18n="time">موعد الزيارة</label>
+            <select id="visitSlot" name="visitSlot" required></select>
+          </div>
+          <div>
+            <label for="paymentMethod" data-i18n="payment">طريقة الدفع</label>
+            <select id="paymentMethod" name="paymentMethod">
+              <option value="knet">KNET</option>
+              <option value="cc">Credit card</option>
+            </select>
+          </div>
+          <div class="full">
+            <label for="notes" data-i18n="notes">ملاحظات</label>
+            <textarea id="notes" name="notes"></textarea>
+          </div>
+        </div>
+        <button class="primary" id="submitButton" type="submit" data-i18n="submit">راجع السياسة وانتقل للدفع</button>
+        <div class="status" id="statusBox"></div>
+      </form>
+
+      <aside class="card">
+        <h2 data-i18n="before">ما الذي يحدث قبل الدفع</h2>
+        <ul class="policy-list">
+          <li data-i18n="policy1">يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.</li>
+          <li data-i18n="policy2">ينتقل العميل إلى الدفع فقط بعد الموافقة.</li>
+          <li data-i18n="policy3">يتم حفظ الحجز فقط بعد نجاح الدفع.</li>
+          <li data-i18n="policy4">يجب حجز الموعد قبل 3 ساعات على الأقل.</li>
+        </ul>
+        <div class="track-box">
+          <input id="trackInput" placeholder="TE-2401">
+          <button type="button" id="trackButton" data-i18n="search">بحث</button>
+        </div>
+        <p class="note" data-i18n="loadingNote">هذه الصفحة خفيفة وسريعة للهواتف. لو كان الاتصال بطيئا، يرجى إبقاء الصفحة مفتوحة.</p>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const fallbackAreas = [
+      { areaEn: 'Adailiya', price: 7, active: true },
+      { areaEn: 'Abdullah Al-Salem', price: 7, active: true },
+      { areaEn: 'Shaab', price: 7, active: true }
+    ];
+    const fallbackSlots = [
+      '12:00 PM - 1:00 PM',
+      '1:00 PM - 2:00 PM',
+      '2:00 PM - 3:00 PM',
+      '3:00 PM - 4:00 PM',
+      '4:00 PM - 5:00 PM',
+      '5:00 PM - 6:00 PM',
+      '6:00 PM - 7:00 PM',
+      '7:00 PM - 8:00 PM',
+      '8:00 PM - 9:00 PM'
+    ];
+    const translations = {
+      ar: {
+        trackLink: 'تتبع الطلب',
+        staffLink: 'دخول الموظفين',
+        title: 'احجز زيارة منزلية',
+        customer: 'اسم العميل',
+        mobile: 'رقم الهاتف',
+        area: 'المنطقة',
+        block: 'قطعة',
+        street: 'شارع',
+        building: 'مبنى / منزل',
+        price: 'سعر التوصيل',
+        service: 'الخدمة',
+        preference: 'تفضيل الخياط',
+        date: 'يوم الزيارة',
+        time: 'موعد الزيارة',
+        payment: 'طريقة الدفع',
+        notes: 'ملاحظات',
+        submit: 'راجع السياسة وانتقل للدفع',
+        before: 'ما الذي يحدث قبل الدفع',
+        policy1: 'يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.',
+        policy2: 'ينتقل العميل إلى الدفع فقط بعد الموافقة.',
+        policy3: 'يتم حفظ الحجز فقط بعد نجاح الدفع.',
+        policy4: 'يجب حجز الموعد قبل 3 ساعات على الأقل.',
+        search: 'بحث',
+        loadingNote: 'هذه الصفحة خفيفة وسريعة للهواتف. لو كان الاتصال بطيئا، يرجى إبقاء الصفحة مفتوحة.',
+        invalidPhone: 'أدخل رقم كويتي صحيح من 8 أرقام ويبدأ بـ 4 أو 5 أو 6 أو 9.',
+        invalidArea: 'اختر منطقة متاحة من القائمة.',
+        noSlot: 'لا توجد مواعيد متاحة لهذا اليوم.',
+        confirm: 'سيتم فتح صفحة الدفع الآن. يتم حفظ الحجز فقط بعد نجاح الدفع. هل تريد المتابعة؟',
+        loading: 'جاري فتح صفحة الدفع...',
+        failed: 'لم تفتح صفحة الدفع. حاول مرة أخرى.'
+      },
+      en: {
+        trackLink: 'Track order',
+        staffLink: 'Staff login',
+        title: 'Book a home visit',
+        customer: 'Customer name',
+        mobile: 'Phone number',
+        area: 'Area',
+        block: 'Block',
+        street: 'Street',
+        building: 'Building / house',
+        price: 'Delivery price',
+        service: 'Service',
+        preference: 'Tailor preference',
+        date: 'Visit day',
+        time: 'Visit time',
+        payment: 'Payment method',
+        notes: 'Notes',
+        submit: 'Review policy and continue to payment',
+        before: 'Before payment',
+        policy1: 'Policies are shown before payment and must be accepted.',
+        policy2: 'The customer goes to payment only after acceptance.',
+        policy3: 'The booking is saved only after payment succeeds.',
+        policy4: 'Appointments must be booked at least 3 hours in advance.',
+        search: 'Search',
+        loadingNote: 'This page is lightweight for phones. If the connection is slow, keep the page open.',
+        invalidPhone: 'Enter a valid 8-digit Kuwait number starting with 4, 5, 6, or 9.',
+        invalidArea: 'Choose an available area from the list.',
+        noSlot: 'No available appointment for this day.',
+        confirm: 'The payment page will open now. Booking is saved only after successful payment. Continue?',
+        loading: 'Opening payment page...',
+        failed: 'Payment page did not open. Please try again.'
+      }
+    };
+
+    let lang = localStorage.getItem('tailor_public_lang') || 'ar';
+    let areas = [];
+    let schedule = { enabled: true, slots: fallbackSlots, rows: [] };
+
+    const el = (id) => document.getElementById(id);
+    const t = (key) => translations[lang][key] || key;
+    const money = (value) => `KD ${Number(value || 0).toFixed(3)}`;
+
+    function applyLanguage() {
+      document.documentElement.lang = lang;
+      document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+      document.querySelectorAll('[data-i18n]').forEach((node) => {
+        node.textContent = t(node.dataset.i18n);
+      });
+      el('langButton').textContent = lang === 'ar' ? 'English' : 'العربية';
+      renderServiceOptions();
+      renderPreferenceOptions();
+      localStorage.setItem('tailor_public_lang', lang);
+    }
+
+    function renderServiceOptions() {
+      const selected = el('service').value || 'Tailoring';
+      const options = lang === 'ar'
+        ? [{ value: 'Repair', label: 'تصليح' }, { value: 'Tailoring', label: 'تفصال' }]
+        : [{ value: 'Repair', label: 'Repair' }, { value: 'Tailoring', label: 'Tailoring' }];
+      el('service').innerHTML = options.map((item) =>
+        `<option value="${item.value}">${item.label}</option>`).join('');
+      el('service').value = selected;
+    }
+
+    function renderPreferenceOptions() {
+      const selected = el('preference').value || '-';
+      const options = lang === 'ar'
+        ? [{ value: '-', label: '-' }, { value: 'Men tailor', label: 'خياط' }, { value: 'Women tailor', label: 'خياطة' }]
+        : [{ value: '-', label: '-' }, { value: 'Men tailor', label: 'Men tailor' }, { value: 'Women tailor', label: 'Women tailor' }];
+      el('preference').innerHTML = options.map((item) =>
+        `<option value="${item.value}">${item.label}</option>`).join('');
+      el('preference').value = selected;
+    }
+
+    function parseDateKey(value) {
+      const match = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(value || '');
+      if (!match) return null;
+      return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+    }
+
+    function parseSlotStart(dateKey, slot) {
+      const date = parseDateKey(dateKey);
+      const match = /(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i.exec(slot || '');
+      if (!date || !match) return null;
+      let hour = Number(match[1]);
+      const minute = Number(match[2] || 0);
+      const period = match[3].toUpperCase();
+      if (period === 'PM' && hour !== 12) hour += 12;
+      if (period === 'AM' && hour === 12) hour = 0;
+      date.setHours(hour, minute, 0, 0);
+      return date;
+    }
+
+    function slotAllowed(dateKey, slot) {
+      const start = parseSlotStart(dateKey, slot);
+      if (!start) return true;
+      return start.getTime() >= Date.now() + 3 * 60 * 60 * 1000;
+    }
+
+    function slotsForRow(row) {
+      const capacities = row.capacities || {};
+      return (schedule.slots || fallbackSlots).filter((slot) =>
+        Number(capacities[slot] || 0) > 0 && slotAllowed(row.date, slot));
+    }
+
+    function activeRows() {
+      if (!schedule.enabled) return [];
+      return (schedule.rows || []).filter((row) => slotsForRow(row).length > 0);
+    }
+
+    function renderAreas() {
+      const list = el('areaList');
+      list.innerHTML = areas.map((area) =>
+        `<option value="${area.areaEn}">${area.areaEn} - ${money(area.price)}</option>`).join('');
+      if (!el('areaSearch').value && areas[0]) {
+        el('areaSearch').value = areas[0].areaEn;
+      }
+      updateAmount();
+    }
+
+    function selectedArea() {
+      const value = el('areaSearch').value.trim().toLowerCase();
+      return areas.find((area) => area.areaEn.toLowerCase() === value);
+    }
+
+    function updateAmount() {
+      const area = selectedArea();
+      el('amount').textContent = money(area ? area.price : 0);
+    }
+
+    function renderDates() {
+      const rows = activeRows();
+      el('visitDate').innerHTML = rows.map((row) =>
+        `<option value="${row.date}">${row.date} - ${row.day || ''}</option>`).join('');
+      renderSlots();
+    }
+
+    function renderSlots() {
+      const row = activeRows().find((item) => item.date === el('visitDate').value);
+      const slots = row ? slotsForRow(row) : [];
+      el('visitSlot').innerHTML = slots.map((slot) =>
+        `<option value="${slot}">${slot}</option>`).join('');
+    }
+
+    function showStatus(message) {
+      const box = el('statusBox');
+      box.textContent = message;
+      box.classList.add('show');
+    }
+
+    function clearStatus() {
+      const box = el('statusBox');
+      box.textContent = '';
+      box.classList.remove('show');
+    }
+
+    async function loadData() {
+      try {
+        const [areaResponse, scheduleResponse] = await Promise.all([
+          fetch('/api/area-prices', { headers: { Accept: 'application/json' } }),
+          fetch('/api/booking-schedule', { headers: { Accept: 'application/json' } })
+        ]);
+        const areaJson = areaResponse.ok ? await areaResponse.json() : fallbackAreas;
+        const scheduleJson = scheduleResponse.ok ? await scheduleResponse.json() : schedule;
+        areas = (Array.isArray(areaJson) ? areaJson : fallbackAreas)
+          .filter((area) => area && area.active !== false)
+          .map((area) => ({
+            areaEn: String(area.areaEn || area.name || '').trim(),
+            price: Number(area.price || 0),
+            active: area.active !== false
+          }))
+          .filter((area) => area.areaEn);
+        if (!areas.length) areas = fallbackAreas;
+        schedule = scheduleJson && typeof scheduleJson === 'object' ? scheduleJson : schedule;
+      } catch (error) {
+        areas = fallbackAreas;
+      }
+      renderAreas();
+      renderDates();
+    }
+
+    async function submitBooking(event) {
+      event.preventDefault();
+      clearStatus();
+
+      const mobile = el('mobile').value.trim();
+      const area = selectedArea();
+      if (!/^[4569]\d{7}$/.test(mobile)) {
+        showStatus(t('invalidPhone'));
+        return;
+      }
+      if (!area) {
+        showStatus(t('invalidArea'));
+        return;
+      }
+      if (!el('visitSlot').value) {
+        showStatus(t('noSlot'));
+        return;
+      }
+      if (!confirm(t('confirm'))) return;
+
+      const selectedGatewaySrc = el('paymentMethod').value;
+      const methodLabel = selectedGatewaySrc === 'cc' ? 'Credit card' : 'KNET';
+      const paymentMethod = `UPay - ${methodLabel}`;
+      const draftId = `DRAFT-${Date.now()}`;
+      const visitWindow = `${el('visitDate').value}, ${el('visitSlot').value}`;
+      const notes = el('notes').value.trim();
+      const paymentNote = lang === 'ar' ? `الدفع: ${paymentMethod}` : `Payment: ${paymentMethod}`;
+      const draft = {
+        customer: el('customer').value.trim(),
+        mobile,
+        areaEn: area.areaEn,
+        areaAr: area.areaEn,
+        block: el('block').value.trim(),
+        street: el('street').value.trim(),
+        building: el('building').value.trim(),
+        service: el('service').value,
+        preference: el('preference').value,
+        window: visitWindow,
+        visitDateIso: parseDateKey(el('visitDate').value)?.toISOString() || '',
+        customerNotes: notes,
+        notes: notes ? `${notes} | ${paymentNote}` : paymentNote,
+        paymentMethod,
+        language: lang
+      };
+
+      el('submitButton').disabled = true;
+      el('submitButton').textContent = t('loading');
+      try {
+        const response = await fetch('/api/payments/create', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            orderId: draftId,
+            customer: draft.customer,
+            mobile: draft.mobile,
+            service: draft.service,
+            amount: area.price,
+            method: paymentMethod,
+            paymentGatewaySrc: selectedGatewaySrc,
+            language: lang,
+            origin: window.location.origin,
+            draft
+          })
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.paymentUrl) {
+          throw new Error(body.error || t('failed'));
+        }
+        window.location.assign(body.paymentUrl);
+      } catch (error) {
+        showStatus(`${t('failed')} ${error.message || ''}`.trim());
+        el('submitButton').disabled = false;
+        el('submitButton').textContent = t('submit');
+      }
+    }
+
+    el('langButton').addEventListener('click', () => {
+      lang = lang === 'ar' ? 'en' : 'ar';
+      applyLanguage();
+    });
+    el('areaSearch').addEventListener('input', updateAmount);
+    el('visitDate').addEventListener('change', renderSlots);
+    el('trackButton').addEventListener('click', () => {
+      const id = el('trackInput').value.trim();
+      window.location.href = id ? `/track?order=${encodeURIComponent(id)}` : '/track';
+    });
+    el('bookingForm').addEventListener('submit', submitBooking);
+
+    applyLanguage();
+    loadData();
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+    }
+  </script>
+</body>
+</html>

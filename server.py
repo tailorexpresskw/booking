@@ -5,6 +5,7 @@ import re
 import secrets
 import urllib.error
 import urllib.request
+import shutil
 from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,6 +26,7 @@ except ImportError:  # pragma: no cover - Python 3.8 fallback.
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / 'build' / 'web'
+SOURCE_WEB_ROOT = ROOT / 'web'
 DATA_DIR = Path(os.environ.get('DATA_DIR', ROOT / 'data'))
 SEED_FILE = Path(os.environ.get('SEED_FILE', DATA_DIR / 'seed_orders.json'))
 FALLBACK_SEED_FILE = ROOT / 'seed_orders.json'
@@ -1623,7 +1625,15 @@ class TailorHandler(SimpleHTTPRequestHandler):
 
     def _static_cache_control(self, path: str) -> str:
         name = path.rsplit('/', 1)[-1].lower()
-        if name in {'index.html', 'flutter_bootstrap.js', 'version.json', 'sw.js', 'main.dart.js', 'flutter.js'}:
+        if name in {
+            'index.html',
+            'customer_booking.html',
+            'flutter_bootstrap.js',
+            'version.json',
+            'sw.js',
+            'main.dart.js',
+            'flutter.js',
+        }:
             return 'no-cache'
         if path.startswith('/assets/') or path.startswith('/canvaskit/') or path.startswith('/icons/'):
             return 'public, max-age=604800'
@@ -1642,6 +1652,23 @@ class TailorHandler(SimpleHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_source_web_file(self, filename: str) -> bool:
+        source = (SOURCE_WEB_ROOT / filename).resolve()
+        try:
+            source.relative_to(SOURCE_WEB_ROOT.resolve())
+        except ValueError:
+            return False
+        if not source.exists() or not source.is_file():
+            return False
+        self._cache_control = self._static_cache_control(f'/{filename}')
+        self.send_response(200)
+        self.send_header('Content-Type', self.guess_type(str(source)))
+        self.send_header('Content-Length', str(source.stat().st_size))
+        self.end_headers()
+        with source.open('rb') as handle:
+            shutil.copyfileobj(handle, self.wfile)
+        return True
 
     def _read_json_body(self) -> dict:
         length = int(self.headers.get('Content-Length', '0') or '0')
@@ -1700,9 +1727,15 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 self.send_error(403)
                 return
             if parsed.path in ('', '/'):
-                self.path = '/index.html'
+                self.path = '/customer_booking.html'
+            elif parsed.path == '/booking':
+                self.path = '/customer_booking.html'
             elif not candidate.exists() or candidate.is_dir():
                 self.path = '/index.html'
+        if self.path == '/customer_booking.html':
+            candidate = (WEB_ROOT / 'customer_booking.html').resolve()
+            if not candidate.exists() and self._send_source_web_file('customer_booking.html'):
+                return
         self._cache_control = self._static_cache_control(urlparse(self.path).path)
         super().do_GET()
 
