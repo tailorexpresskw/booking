@@ -3096,34 +3096,16 @@ class _BookingPageState extends State<BookingPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              s.t('What happens before payment', 'ما الذي يحدث قبل الدفع'),
+              s.t('Before payment',
+                  '\u0642\u0628\u0644 \u0627\u0644\u062f\u0641\u0639'),
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
             bullet(s.t(
                 'Policies are shown before payment and must be accepted.',
-                'يتم عرض السياسات قبل الدفع ويجب الموافقة عليها.')),
+                '\u064a\u062c\u0628 \u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a \u0648\u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0639\u0644\u064a\u0647\u0627 \u0642\u0628\u0644 \u0627\u0644\u062f\u0641\u0639.')),
             bullet(s.t('The customer moves to payment only after agreeing.',
-                'ينتقل العميل إلى الدفع فقط بعد الموافقة.')),
-            bullet(s.t('Admin policy text is reused here automatically.',
-                'يتم استخدام نص سياسات الإدارة هنا تلقائياً.')),
-            const SizedBox(height: 10),
-            for (final policy in adminPolicies)
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFFCF7),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFE6D9BE)),
-                ),
-                child: Text(
-                  s.isArabic ? policy.nameAr : policy.nameEn,
-                  style:
-                      const TextStyle(fontWeight: FontWeight.w700, color: ink),
-                ),
-              ),
+                '\u064a\u0646\u062a\u0642\u0644 \u0627\u0644\u0639\u0645\u064a\u0644 \u0625\u0644\u0649 \u0627\u0644\u062f\u0641\u0639 \u0641\u0642\u0637 \u0628\u0639\u062f \u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629.')),
           ],
         ),
       ),
@@ -3368,6 +3350,7 @@ class _BookingPageState extends State<BookingPage> {
   Future<void> showPolicyGate() async {
     final s = widget.state;
     var agreed = false;
+    var policiesOpen = false;
     final dialogWidth = dialogContentWidth(context, 860);
     final proceed = await showDialog<bool>(
       context: context,
@@ -3381,11 +3364,19 @@ class _BookingPageState extends State<BookingPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(s.t(
-                      'Payment is locked until the customer agrees to the booking policies below.',
-                      'يتم قفل الدفع حتى يوافق العميل على سياسات الحجز التالية.')),
-                  const SizedBox(height: 14),
-                  for (final policy in adminPolicies) policyCard(policy),
+                  OutlinedButton(
+                    onPressed: () => setDialogState(
+                        () => policiesOpen = !policiesOpen),
+                    child: Text(s.t(
+                        policiesOpen ? 'Hide policies' : 'Show policies',
+                        policiesOpen
+                            ? '\u0625\u062e\u0641\u0627\u0621 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a'
+                            : '\u0639\u0631\u0636 \u0627\u0644\u0633\u064a\u0627\u0633\u0627\u062a')),
+                  ),
+                  if (policiesOpen) ...[
+                    const SizedBox(height: 14),
+                    for (final policy in adminPolicies) policyCard(policy),
+                  ],
                   const SizedBox(height: 12),
                   CheckboxListTile(
                     value: agreed,
