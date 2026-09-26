@@ -176,6 +176,48 @@ HIGH_PRICE_AREAS = {
     'Wafra',
 }
 
+AREA_ZONE_NAMES = {
+    1: {
+        'Abdullah Al-Salem', 'Adailiya', 'Bneid Al Gar', 'Daiya', 'Dasma',
+        'Faiha', 'Kaifan', 'Khaldiya', 'Kuwait City', 'Mansouriya', 'Mirqab',
+        'Nuzha', 'Qadsiya', 'Qibla', 'Rawda', 'Sharq', 'Shamiya', 'Shuwaikh',
+        'Shuwaikh Industrial', 'Surra', 'Yarmouk',
+    },
+    2: {
+        'Bayan', 'Hateen', 'Hawally', 'Jabriya', 'Messila', 'Mishref',
+        'Mubarak Al-Abdullah', 'Rumaithiya', 'Salam', 'Salmiya', 'Salwa',
+        'Shaab', 'Shuhada', 'Siddeeq', 'Zahra',
+    },
+    3: {
+        'Abu Al Hasaniya', 'Abu Futaira', 'Adan', 'Egaila', 'Fintas',
+        'Fnaitees', 'Masayel', 'Mubarak Al-Kabeer', 'Sabah Al-Salem',
+        'West Abu Fatira',
+    },
+    4: {
+        'Abdullah Al-Mubarak', 'Amghara', 'Andalus', 'Ardiya',
+        'Ardiya Industrial', 'Ashbelia', 'Dhajeej', 'Doha', 'Farwaniya',
+        'Firdous', 'Granada', 'Jaber Al Ahmad', 'Jleeb Al-Shuyoukh',
+        'Khaitan', 'North West Sulaibikhat', 'Omariya', 'Qairawan', 'Rabia',
+        'Rehab', 'Riggae', 'Sabah Al-Nasser', 'Sabhan',
+        'South Abdullah Al-Mubarak', 'Sulaibikhat', 'Sulaibiya',
+        'Sulaibiya Industrial', 'West Abdullah Mubarak',
+    },
+    5: {
+        'Abdali', 'Abu Halifa', 'Ahmadi', 'Ali Sabah Al-Salem', 'Fahaheel',
+        'Hadiya', 'Jaber Al Ali', 'Jahra', 'Kabd', 'Mahboula', 'Mangaf',
+        'Nassem', 'Oyoun', 'Riqqa', 'Saad Al-Abdullah', 'Sabah Al-Ahmad',
+        'Sabahiya', 'Taima', 'Wafra', 'Waha',
+    },
+}
+
+
+def default_area_zone(area_name: str) -> int:
+    normalized = area_name.strip().lower()
+    for zone, names in AREA_ZONE_NAMES.items():
+        if any(name.lower() == normalized for name in names):
+            return zone
+    return 1
+
 
 DEFAULT_STAFF_USERS = [
     {'username': 'admin', 'password': 'Admin123!', 'displayName': 'Admin', 'role': 'admin', 'branch': '', 'active': True, 'availableToday': True, 'homeServiceToday': True},
@@ -196,6 +238,20 @@ VALID_ROLES = {
     'receptionist',
     'tailor',
     'driver',
+}
+VALID_ORDER_STAGES = {
+    'newBooking',
+    'completed',
+    'onShop',
+    'outForDelivery',
+    'branchAssigned',
+    'assigned',
+    'onWay',
+    'tailoring',
+    'ready',
+    'delivered',
+    'complete',
+    'cancelled',
 }
 
 
@@ -231,6 +287,7 @@ def default_area_prices() -> list[dict]:
             'areaEn': name,
             'price': 7.0 if name in HIGH_PRICE_AREAS else 5.0,
             'active': True,
+            'zone': default_area_zone(name),
         }
         for name in DEFAULT_AREA_NAMES
     ]
@@ -242,10 +299,15 @@ def normalize_area_price(item: dict) -> dict:
         price = float(item.get('price', 5.0))
     except (TypeError, ValueError):
         price = 5.0
+    try:
+        zone = int(item.get('zone', default_area_zone(area)))
+    except (TypeError, ValueError):
+        zone = default_area_zone(area)
     return {
         'areaEn': area,
         'price': max(price, 0.0),
         'active': bool(item.get('active', True)),
+        'zone': min(max(zone, 1), 5),
     }
 
 
@@ -542,6 +604,14 @@ def update_area_price(area_en: str, payload: dict) -> dict:
         area['price'] = price
     if 'active' in payload:
         area['active'] = bool(payload['active'])
+    if 'zone' in payload:
+        try:
+            zone = int(payload['zone'])
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Zone must be a number from 1 to 5.') from exc
+        if zone < 1 or zone > 5:
+            raise ValueError('Zone must be a number from 1 to 5.')
+        area['zone'] = zone
     save_area_prices(prices)
     return normalize_area_price(area)
 
@@ -551,6 +621,9 @@ def normalize_order(order: dict) -> dict:
         'branch': 'Pending assignment',
         'receptionist': 'Pending assignment',
         'driver': 'Pending assignment',
+        'pickupDriver': 'Pending assignment',
+        'deliveryDriver': 'Pending assignment',
+        'driverMission': '',
         'tailor': 'Pending assignment',
         'stage': 'newBooking',
         'timeline': [],
@@ -558,9 +631,10 @@ def normalize_order(order: dict) -> dict:
         'paymentMethod': 'UPay',
         'paymentStatus': 'pending',
         'cancelReason': '',
+        'statusHistory': [],
     }
     for key, value in defaults.items():
-        if key == 'timeline':
+        if key in {'timeline', 'statusHistory'}:
             if not isinstance(order.get(key), list):
                 order[key] = []
         elif not str(order.get(key, '')).strip():
@@ -853,6 +927,8 @@ def notify_order_changed(original: dict, order: dict) -> None:
     old_branch = str(original.get('branch', '')).strip()
     old_driver = str(original.get('driver', '')).strip()
     old_receptionist = str(original.get('receptionist', '')).strip()
+    old_stage = str(original.get('stage', '')).strip()
+    new_stage = str(order.get('stage', '')).strip()
 
     if branch and branch != 'Pending assignment' and branch != old_branch:
         send_staff_push(
@@ -884,7 +960,19 @@ def notify_order_changed(original: dict, order: dict) -> None:
             usernames=users,
             order_id=order_id,
         )
-    if str(order.get('stage', '')).strip() != str(original.get('stage', '')).strip():
+    if new_stage == 'ready' and new_stage != old_stage:
+        send_staff_push(
+            f'{order_id} is ready and needs a delivery driver.',
+            roles={'admin', 'driverSupervisor'},
+            order_id=order_id,
+        )
+    if new_stage == 'onShop' and new_stage != old_stage:
+        send_staff_push(
+            f'{order_id} arrived at the shop. The pickup driver was released.',
+            roles={'admin', 'receptionistSupervisor'},
+            order_id=order_id,
+        )
+    if new_stage != old_stage:
         send_staff_push(
             f'{order_id} status changed to {order.get("stage", "")}.',
             roles={'admin', 'receptionistSupervisor', 'driverSupervisor'},
@@ -1612,6 +1700,9 @@ def build_order(payload: dict, orders: list[dict]) -> dict:
         'branch': 'Pending assignment',
         'receptionist': 'Pending assignment',
         'driver': 'Pending assignment',
+        'pickupDriver': 'Pending assignment',
+        'deliveryDriver': 'Pending assignment',
+        'driverMission': '',
         'tailor': 'Pending assignment',
         'stage': 'newBooking',
         'lat': DEFAULT_LAT,
@@ -1623,6 +1714,7 @@ def build_order(payload: dict, orders: list[dict]) -> dict:
         'paymentStatus': str(payload.get('paymentStatus', 'pending')).strip() or 'pending',
         'paymentDraftId': str(payload.get('paymentDraftId', '')).strip(),
         'timeline': timeline,
+        'statusHistory': [],
     }
 
 
@@ -1978,9 +2070,19 @@ class TailorHandler(SimpleHTTPRequestHandler):
         old_window = str(original.get('window', ''))
 
         allowed = {
+            'customer',
+            'mobile',
+            'areaEn',
+            'areaAr',
+            'address',
+            'service',
+            'preference',
             'branch',
             'receptionist',
             'driver',
+            'pickupDriver',
+            'deliveryDriver',
+            'driverMission',
             'tailor',
             'stage',
             'paymentStatus',
@@ -1992,6 +2094,64 @@ class TailorHandler(SimpleHTTPRequestHandler):
             if key in payload:
                 fallback = 'Pending assignment' if key in {'branch', 'receptionist', 'driver', 'tailor'} else ''
                 order[key] = str(payload.get(key, '')).strip() or fallback
+
+        if 'mobile' in payload:
+            try:
+                order['mobile'] = normalize_kuwait_mobile(order.get('mobile', ''))
+            except ValueError as exc:
+                order.clear()
+                order.update(original)
+                self._send_json({'error': str(exc)}, status=400)
+                return
+        if 'stage' in payload and str(order.get('stage', '')).strip() not in VALID_ORDER_STAGES:
+            order.clear()
+            order.update(original)
+            self._send_json({'error': 'Invalid order status.'}, status=400)
+            return
+        for required_key in {'customer', 'areaEn', 'address', 'service', 'preference'}:
+            if required_key in payload and not str(order.get(required_key, '')).strip():
+                order.clear()
+                order.update(original)
+                self._send_json({'error': f'{required_key} cannot be empty.'}, status=400)
+                return
+
+        old_stage = str(original.get('stage', 'newBooking')).strip() or 'newBooking'
+        new_stage = str(order.get('stage', old_stage)).strip() or old_stage
+        old_driver = str(original.get('driver', 'Pending assignment')).strip() or 'Pending assignment'
+        new_driver = str(order.get('driver', old_driver)).strip() or 'Pending assignment'
+        pending_driver = new_driver == 'Pending assignment'
+
+        if 'driver' in payload and not pending_driver:
+            requested_mission = str(payload.get('driverMission', '')).strip().lower()
+            if requested_mission not in {'pickup', 'delivery'}:
+                requested_mission = (
+                    'delivery'
+                    if new_stage in {'ready', 'outForDelivery', 'delivered', 'complete'}
+                    else 'pickup'
+                )
+            order['driverMission'] = requested_mission
+            if requested_mission == 'pickup':
+                order['pickupDriver'] = new_driver
+            else:
+                order['deliveryDriver'] = new_driver
+
+        assigning_delivery_driver = (
+            'driver' in payload
+            and str(payload.get('driverMission', '')).strip().lower() == 'delivery'
+            and new_driver != 'Pending assignment'
+        )
+        if new_stage in {'onShop', 'tailoring'} or (
+            new_stage == 'ready' and not assigning_delivery_driver
+        ):
+            if old_driver != 'Pending assignment' and str(original.get('driverMission', '')).strip() != 'delivery':
+                order['pickupDriver'] = old_driver
+            order['driver'] = 'Pending assignment'
+            order['driverMission'] = ''
+        elif new_stage in {'delivered', 'complete'}:
+            active_driver = str(order.get('driver', '')).strip()
+            if active_driver and active_driver != 'Pending assignment':
+                order['deliveryDriver'] = active_driver
+                order['driverMission'] = 'delivery'
 
         normalize_order(order)
         new_active = order_reserves_schedule(order)
@@ -2021,6 +2181,24 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 timeline = []
                 order['timeline'] = timeline
             timeline.append(f'{timestamp()} - {note}')
+
+        if new_stage != old_stage:
+            status_history = order.setdefault('statusHistory', [])
+            if not isinstance(status_history, list):
+                status_history = []
+                order['statusHistory'] = status_history
+            status_history.append({
+                'id': secrets.token_hex(8),
+                'timestamp': datetime.now(KUWAIT_TZ).isoformat(),
+                'fromStage': old_stage,
+                'toStage': new_stage,
+                'changedBy': str(payload.get('changedBy', 'Staff')).strip() or 'Staff',
+                'note': note,
+                'fromDriver': old_driver,
+                'toDriver': str(order.get('driver', 'Pending assignment')),
+                'fromDriverMission': str(original.get('driverMission', '')),
+                'toDriverMission': str(order.get('driverMission', '')),
+            })
 
         save_orders(orders)
         notify_order_changed(original, order)

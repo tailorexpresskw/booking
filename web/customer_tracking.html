@@ -441,6 +441,7 @@
         ready: 'جاهز',
         outForDelivery: 'خارج للتوصيل',
         delivered: 'تم التسليم',
+        complete: 'مكتمل',
         cancellationReason: 'سبب الإلغاء'
       },
       en: {
@@ -466,6 +467,7 @@
         ready: 'Ready',
         outForDelivery: 'Out for delivery',
         delivered: 'Delivered',
+        complete: 'Complete',
         cancellationReason: 'Cancellation reason'
       }
     };
@@ -508,11 +510,12 @@
       if (key === 'ready') return t('ready');
       if (key === 'outForDelivery' || key === 'assigned' || key === 'onWay') return t('outForDelivery');
       if (key === 'delivered') return t('delivered');
+      if (key === 'complete') return t('complete');
       return key || t('pending');
     }
 
     function stageClass(stage) {
-      if (stage === 'delivered') return 'pill success';
+      if (stage === 'delivered' || stage === 'complete') return 'pill success';
       if (stage === 'cancelled') return 'pill danger';
       if (stage === 'newBooking') return 'pill warning';
       return 'pill';

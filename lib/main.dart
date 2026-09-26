@@ -36,6 +36,7 @@ enum Stage {
   tailoring,
   ready,
   delivered,
+  complete,
   cancelled
 }
 
@@ -94,6 +95,7 @@ String stageLabel(Stage stage, bool ar) => switch (stage) {
       Stage.delivered => ar
           ? '\u062a\u0645 \u0627\u0644\u062a\u0633\u0644\u064a\u0645'
           : 'Delivered',
+      Stage.complete => ar ? '\u0645\u0643\u062a\u0645\u0644' : 'Complete',
       Stage.cancelled => ar ? '\u0645\u0644\u063a\u064a' : 'Cancelled',
     };
 
@@ -108,6 +110,7 @@ String legacyStageLabel(Stage stage, bool ar) => switch (stage) {
       Stage.onWay =>
         ar ? 'خارج للتوصيل' : 'Out for Delivery',
       Stage.delivered => ar ? 'تم التسليم' : 'Delivered',
+      Stage.complete => ar ? '\u0645\u0643\u062a\u0645\u0644' : 'Complete',
     };
 
 Stage stageFromKey(String value) {
@@ -133,6 +136,7 @@ Color stageColor(Stage stage) => switch (stage) {
       Stage.onWay =>
         const Color(0xFF2A63B5),
       Stage.delivered => const Color(0xFF2D8A57),
+      Stage.complete => const Color(0xFF245B45),
       Stage.cancelled => const Color(0xFF9A3A2F),
     };
 
@@ -143,7 +147,8 @@ int stageRank(Stage stage) => switch (stage) {
       Stage.ready => 3,
       Stage.outForDelivery || Stage.assigned || Stage.onWay => 4,
       Stage.delivered => 5,
-      Stage.cancelled => 6,
+      Stage.complete => 6,
+      Stage.cancelled => 7,
     };
 
 String customerStageLabel(Stage stage, bool ar) => switch (stage) {
@@ -164,6 +169,7 @@ String customerStageLabel(Stage stage, bool ar) => switch (stage) {
       Stage.delivered => ar
           ? '\u062a\u0645 \u0627\u0644\u062a\u0633\u0644\u064a\u0645'
           : 'Delivered',
+      Stage.complete => ar ? '\u0645\u0643\u062a\u0645\u0644' : 'Complete',
       Stage.cancelled => ar ? '\u0645\u0644\u063a\u064a' : 'Cancelled',
     };
 
@@ -181,14 +187,31 @@ String legacyCustomerStageLabel(Stage stage, bool ar) => switch (stage) {
       Stage.onWay =>
         ar ? 'خارج للتوصيل' : 'Out for Delivery',
       Stage.delivered => ar ? 'تم التسليم' : 'Delivered',
+      Stage.complete => ar ? '\u0645\u0643\u062a\u0645\u0644' : 'Complete',
     };
 
-bool isReadyForDriverAssignment(Order order) =>
+bool needsPickupDriver(Order order) =>
+    order.hasBranch &&
+    !order.hasDriver &&
+    {Stage.newBooking, Stage.completed, Stage.branchAssigned}
+        .contains(order.stage);
+
+bool needsDeliveryDriver(Order order) =>
     order.stage == Stage.ready && order.hasBranch && !order.hasDriver;
 
+bool isReadyForDriverAssignment(Order order) =>
+    needsPickupDriver(order) || needsDeliveryDriver(order);
+
+String driverMissionForAssignment(Order order) =>
+    needsDeliveryDriver(order) ? 'delivery' : 'pickup';
+
 bool isDelivered(Order order) => order.stage == Stage.delivered;
+bool isLegacyDelivered(Order order) =>
+    order.stage == Stage.delivered && order.statusHistory.isEmpty;
 bool isClosedOrder(Order order) =>
-    order.stage == Stage.delivered || order.stage == Stage.cancelled;
+    order.stage == Stage.complete ||
+    order.stage == Stage.cancelled ||
+    isLegacyDelivered(order);
 
 bool isDraftOrderId(String value) =>
     value.trim().toUpperCase().startsWith('DRAFT-');
@@ -203,6 +226,60 @@ class Area {
   final String en;
   final String ar;
   String name(bool isArabic) => isArabic ? ar : en;
+}
+
+class StatusHistoryEntry {
+  const StatusHistoryEntry({
+    required this.id,
+    required this.timestamp,
+    required this.fromStage,
+    required this.toStage,
+    required this.changedBy,
+    required this.note,
+    this.fromDriver = 'Pending assignment',
+    this.toDriver = 'Pending assignment',
+    this.fromDriverMission = '',
+    this.toDriverMission = '',
+  });
+
+  final String id;
+  final String timestamp;
+  final String fromStage;
+  final String toStage;
+  final String changedBy;
+  final String note;
+  final String fromDriver;
+  final String toDriver;
+  final String fromDriverMission;
+  final String toDriverMission;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'timestamp': timestamp,
+        'fromStage': fromStage,
+        'toStage': toStage,
+        'changedBy': changedBy,
+        'note': note,
+        'fromDriver': fromDriver,
+        'toDriver': toDriver,
+        'fromDriverMission': fromDriverMission,
+        'toDriverMission': toDriverMission,
+      };
+
+  factory StatusHistoryEntry.fromJson(Map<String, dynamic> json) =>
+      StatusHistoryEntry(
+        id: json['id']?.toString() ?? '',
+        timestamp: json['timestamp']?.toString() ?? '',
+        fromStage: json['fromStage']?.toString() ?? 'newBooking',
+        toStage: json['toStage']?.toString() ?? 'newBooking',
+        changedBy: json['changedBy']?.toString() ?? 'Staff',
+        note: json['note']?.toString() ?? '',
+        fromDriver:
+            json['fromDriver']?.toString() ?? 'Pending assignment',
+        toDriver: json['toDriver']?.toString() ?? 'Pending assignment',
+        fromDriverMission: json['fromDriverMission']?.toString() ?? '',
+        toDriverMission: json['toDriverMission']?.toString() ?? '',
+      );
 }
 
 class Order {
@@ -224,12 +301,16 @@ class Order {
     this.branch = 'Pending assignment',
     this.receptionist = 'Pending assignment',
     required this.driver,
+    this.pickupDriver = 'Pending assignment',
+    this.deliveryDriver = 'Pending assignment',
+    this.driverMission = '',
     required this.tailor,
     required this.stage,
     required this.lat,
     required this.lng,
     required this.notes,
     required this.timeline,
+    this.statusHistory = const [],
   });
 
   final String id;
@@ -249,12 +330,16 @@ class Order {
   final String branch;
   final String receptionist;
   final String driver;
+  final String pickupDriver;
+  final String deliveryDriver;
+  final String driverMission;
   final String tailor;
   final Stage stage;
   final double lat;
   final double lng;
   final String notes;
   final List<String> timeline;
+  final List<StatusHistoryEntry> statusHistory;
 
   String area(bool isArabic) => isArabic ? areaAr : areaEn;
 
@@ -263,25 +348,36 @@ class Order {
   bool get hasDriver => !isPendingAssignment(driver);
 
   Order copyWith({
+    String? customer,
+    String? mobile,
+    String? areaEn,
+    String? areaAr,
+    String? address,
+    String? service,
+    String? preference,
     String? branch,
     String? receptionist,
     String? driver,
+    String? pickupDriver,
+    String? deliveryDriver,
+    String? driverMission,
     String? tailor,
     String? window,
     Stage? stage,
     List<String>? timeline,
+    List<StatusHistoryEntry>? statusHistory,
     String? notes,
     String? paymentStatus,
   }) =>
       Order(
         id: id,
-        customer: customer,
-        mobile: mobile,
-        areaEn: areaEn,
-        areaAr: areaAr,
-        address: address,
-        service: service,
-        preference: preference,
+        customer: customer ?? this.customer,
+        mobile: mobile ?? this.mobile,
+        areaEn: areaEn ?? this.areaEn,
+        areaAr: areaAr ?? this.areaAr,
+        address: address ?? this.address,
+        service: service ?? this.service,
+        preference: preference ?? this.preference,
         window: window ?? this.window,
         invoiceNo: invoiceNo,
         deliveryPrice: deliveryPrice,
@@ -291,12 +387,16 @@ class Order {
         branch: branch ?? this.branch,
         receptionist: receptionist ?? this.receptionist,
         driver: driver ?? this.driver,
+        pickupDriver: pickupDriver ?? this.pickupDriver,
+        deliveryDriver: deliveryDriver ?? this.deliveryDriver,
+        driverMission: driverMission ?? this.driverMission,
         tailor: tailor ?? this.tailor,
         stage: stage ?? this.stage,
         lat: lat,
         lng: lng,
         notes: notes ?? this.notes,
         timeline: timeline ?? this.timeline,
+        statusHistory: statusHistory ?? this.statusHistory,
       );
 
   Map<String, dynamic> toJson() => {
@@ -317,12 +417,16 @@ class Order {
         'branch': branch,
         'receptionist': receptionist,
         'driver': driver,
+        'pickupDriver': pickupDriver,
+        'deliveryDriver': deliveryDriver,
+        'driverMission': driverMission,
         'tailor': tailor,
         'stage': stage.name,
         'lat': lat,
         'lng': lng,
         'notes': notes,
         'timeline': timeline,
+        'statusHistory': statusHistory.map((item) => item.toJson()).toList(),
       };
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -347,6 +451,11 @@ class Order {
         branch: json['branch'] as String? ?? 'Pending assignment',
         receptionist: json['receptionist'] as String? ?? 'Pending assignment',
         driver: json['driver'] as String? ?? '',
+        pickupDriver:
+            json['pickupDriver'] as String? ?? 'Pending assignment',
+        deliveryDriver:
+            json['deliveryDriver'] as String? ?? 'Pending assignment',
+        driverMission: json['driverMission'] as String? ?? '',
         tailor: json['tailor'] as String? ?? '',
         stage: stageFromKey(json['stage'] as String? ?? ''),
         lat: (json['lat'] as num?)?.toDouble() ?? 0,
@@ -355,6 +464,12 @@ class Order {
         timeline: [
           for (final item in (json['timeline'] as List? ?? const <dynamic>[]))
             item.toString(),
+        ],
+        statusHistory: [
+          for (final item
+              in (json['statusHistory'] as List? ?? const <dynamic>[]))
+            if (item is Map)
+              StatusHistoryEntry.fromJson(Map<String, dynamic>.from(item)),
         ],
       );
 }
@@ -440,16 +555,19 @@ class DeliveryAreaPrice {
     required this.areaEn,
     required this.price,
     this.active = true,
+    this.zone = 1,
   });
 
   final String areaEn;
   final double price;
   final bool active;
+  final int zone;
 
   Map<String, dynamic> toJson() => {
         'areaEn': areaEn,
         'price': price,
         'active': active,
+        'zone': zone,
       };
 
   factory DeliveryAreaPrice.fromJson(Map<String, dynamic> json) =>
@@ -457,8 +575,17 @@ class DeliveryAreaPrice {
         areaEn: json['areaEn'] as String? ?? json['name'] as String? ?? '',
         price: (json['price'] as num?)?.toDouble() ?? 5.0,
         active: json['active'] as bool? ?? true,
+        zone: ((json['zone'] as num?)?.toInt() ?? 1).clamp(1, 5).toInt(),
       );
 }
+
+Color areaZoneColor(int zone) => switch (zone) {
+      2 => const Color(0xFFE9D9FF),
+      3 => const Color(0xFFD8F5E2),
+      4 => const Color(0xFFFFD8B0),
+      5 => const Color(0xFFFFEBAF),
+      _ => const Color(0xFFDCEBFF),
+    };
 
 class BookingScheduleSettings {
   const BookingScheduleSettings({
@@ -1364,6 +1491,8 @@ class AppState extends ChangeNotifier {
       areaPrice(areaEn)?.price ??
       (highDeliveryPriceAreas.contains(areaEn) ? 7.0 : 5.0);
 
+  int areaZoneFor(String areaEn) => areaPrice(areaEn)?.zone ?? 1;
+
   bool areaIsActive(String areaEn) => areaPrice(areaEn)?.active ?? true;
 
   void _loadAreaPrices() {
@@ -1423,13 +1552,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> updateAreaPrice(String areaEn, double price, bool active,
-      {String? newAreaEn}) async {
+      {String? newAreaEn, int? zone}) async {
     final next = DeliveryAreaPrice(
         areaEn: (newAreaEn?.trim().isNotEmpty ?? false)
             ? newAreaEn!.trim()
             : areaEn,
         price: price,
-        active: active);
+        active: active,
+        zone: zone ?? areaPrice(areaEn)?.zone ?? 1);
     try {
       final response = await html.HttpRequest.request(
         apiUrl('/api/area-prices/${Uri.encodeComponent(areaEn)}'),
@@ -1445,6 +1575,8 @@ class AppState extends ChangeNotifier {
       );
       final status = response.status ?? 0;
       if (status >= 200 && status < 300 && response.responseText != null) {
+        areaPrices.removeWhere(
+            (item) => item.areaEn.toLowerCase() == areaEn.toLowerCase());
         _upsertAreaPrice(DeliveryAreaPrice.fromJson(Map<String, dynamic>.from(
             jsonDecode(response.responseText!) as Map)));
         notifyListeners();
@@ -1634,16 +1766,27 @@ class AppState extends ChangeNotifier {
       final a = orders[i];
       final b = next[i];
       if (a.id != b.id ||
+          a.customer != b.customer ||
+          a.mobile != b.mobile ||
+          a.areaEn != b.areaEn ||
+          a.areaAr != b.areaAr ||
+          a.address != b.address ||
+          a.service != b.service ||
+          a.preference != b.preference ||
           a.stage != b.stage ||
           a.branch != b.branch ||
           a.receptionist != b.receptionist ||
           a.driver != b.driver ||
+          a.pickupDriver != b.pickupDriver ||
+          a.deliveryDriver != b.deliveryDriver ||
+          a.driverMission != b.driverMission ||
           a.tailor != b.tailor ||
           a.window != b.window ||
           a.notes != b.notes ||
           a.deliveryPrice != b.deliveryPrice ||
           a.totalAmount != b.totalAmount ||
-          a.paymentStatus != b.paymentStatus) {
+          a.paymentStatus != b.paymentStatus ||
+          a.statusHistory.length != b.statusHistory.length) {
         return false;
       }
     }
@@ -1780,7 +1923,7 @@ class AppState extends ChangeNotifier {
             messages['${order.id}:branch'] = t(
                 'New booking ${order.id} needs branch assignment.',
                 'حجز جديد ${order.id} يحتاج تعيين الفرع.');
-          } else if (!order.hasDriver) {
+          } else if (isReadyForDriverAssignment(order)) {
             messages['${order.id}:driver'] = t(
                 '${order.id} has a branch and needs driver follow-up.',
                 '${order.id} يحتاج متابعة السائق بعد تعيين الفرع.');
@@ -1794,7 +1937,7 @@ class AppState extends ChangeNotifier {
           }
           break;
         case Role.driverSupervisor:
-          if (order.hasBranch && !order.hasDriver) {
+          if (isReadyForDriverAssignment(order)) {
             messages['${order.id}:driver'] = t(
                 '${order.id} was assigned to ${order.branch} and needs driver follow-up.',
                 '${order.id} تم تعيينه إلى ${order.branch} ويحتاج متابعة السائق.');
@@ -2239,9 +2382,19 @@ class AppState extends ChangeNotifier {
 
   Future<void> updateOrder(
     String id, {
+    String? customer,
+    String? mobile,
+    String? areaEn,
+    String? areaAr,
+    String? address,
+    String? service,
+    String? preference,
     String? branch,
     String? receptionist,
     String? driver,
+    String? pickupDriver,
+    String? deliveryDriver,
+    String? driverMission,
     String? tailor,
     String? window,
     String? notes,
@@ -2256,10 +2409,45 @@ class AppState extends ChangeNotifier {
     final nextTimeline = timelineNote == null
         ? original.timeline
         : [...original.timeline, timelineNow(timelineNote)];
+    var localDriver = driver;
+    var localPickupDriver = pickupDriver;
+    var localDeliveryDriver = deliveryDriver;
+    var localDriverMission = driverMission;
+    if (driver != null && !isPendingAssignment(driver)) {
+      final mission = driverMission ?? driverMissionForAssignment(original);
+      localDriverMission = mission;
+      if (mission == 'delivery') {
+        localDeliveryDriver = driver;
+      } else {
+        localPickupDriver = driver;
+      }
+    }
+    if (stage == Stage.onShop || stage == Stage.ready) {
+      if (original.hasDriver && original.driverMission != 'delivery') {
+        localPickupDriver = original.driver;
+      }
+      localDriver = 'Pending assignment';
+      localDriverMission = '';
+    }
+    if ((stage == Stage.delivered || stage == Stage.complete) &&
+        original.hasDriver) {
+      localDeliveryDriver = original.driver;
+      localDriverMission = 'delivery';
+    }
     final local = original.copyWith(
+      customer: customer,
+      mobile: mobile,
+      areaEn: areaEn,
+      areaAr: areaAr,
+      address: address,
+      service: service,
+      preference: preference,
       branch: branch,
       receptionist: receptionist,
-      driver: driver,
+      driver: localDriver,
+      pickupDriver: localPickupDriver,
+      deliveryDriver: localDeliveryDriver,
+      driverMission: localDriverMission,
       tailor: tailor,
       window: window,
       stage: stage,
@@ -2273,15 +2461,26 @@ class AppState extends ChangeNotifier {
         apiUrl('/api/orders/$id'),
         method: 'PATCH',
         sendData: jsonEncode({
+          if (customer != null) 'customer': customer,
+          if (mobile != null) 'mobile': mobile,
+          if (areaEn != null) 'areaEn': areaEn,
+          if (areaAr != null) 'areaAr': areaAr,
+          if (address != null) 'address': address,
+          if (service != null) 'service': service,
+          if (preference != null) 'preference': preference,
           if (branch != null) 'branch': branch,
           if (receptionist != null) 'receptionist': receptionist,
           if (driver != null) 'driver': driver,
+          if (pickupDriver != null) 'pickupDriver': pickupDriver,
+          if (deliveryDriver != null) 'deliveryDriver': deliveryDriver,
+          if (driverMission != null) 'driverMission': driverMission,
           if (tailor != null) 'tailor': tailor,
           if (window != null) 'window': window,
           if (notes != null) 'notes': notes,
           if (stage != null) 'stage': stage.name,
           if (paymentStatus != null) 'paymentStatus': paymentStatus,
           if (timelineNote != null) 'timelineNote': timelineNote,
+          'changedBy': currentStaffName,
         }),
         requestHeaders: {
           'Accept': 'application/json',
@@ -4155,10 +4354,10 @@ class DashboardPage extends StatelessWidget {
       return AdminDashboard(state: state);
     }
     if (role == Role.receptionistSupervisor) {
-      return ReceptionistSupervisorDashboard(state: state, role: role);
+      return SupervisorDashboardShell(state: state, role: role);
     }
     if (role == Role.driverSupervisor) {
-      return DriverSupervisorDashboard(state: state, role: role);
+      return SupervisorDashboardShell(state: state, role: role);
     }
     if (role == Role.receptionist) {
       return ReceptionistDashboard(state: state, role: role);
@@ -4293,6 +4492,7 @@ class OrdersDashboardTable extends StatefulWidget {
 
 class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   final search = TextEditingController();
+  final tableScrollController = ScrollController();
   final idFilter = TextEditingController();
   final customerFilter = TextEditingController();
   final mobileFilter = TextEditingController();
@@ -4301,6 +4501,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   final receptionistFilter = TextEditingController();
   final driverFilter = TextEditingController();
   Stage? selectedStage;
+  int? selectedZone;
   String selectedBranch = 'All';
   String datePreset = 'nearest';
   DateTime? fromDate;
@@ -4320,6 +4521,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   @override
   void dispose() {
     search.dispose();
+    tableScrollController.dispose();
     for (final controller in columnFilters) {
       controller.dispose();
     }
@@ -4443,14 +4645,16 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   bool tableIncludesOrder(Order order) {
     if (!hasConfirmedPayment(order)) return false;
     if (widget.historyMode) return isClosedOrder(order);
-    return order.stage != Stage.delivered;
+    return order.stage != Stage.complete && !isLegacyDelivered(order);
   }
 
   List<Order> get baseVisibleOrders =>
       widget.orders.where(tableIncludesOrder).toList();
 
   bool canRescheduleOrder(Order order) =>
-      canCancelOrReschedule && order.stage != Stage.delivered;
+      canCancelOrReschedule &&
+      order.stage != Stage.complete &&
+      !isLegacyDelivered(order);
 
   bool canCancelOrder(Order order) =>
       canCancelOrReschedule && !isClosedOrder(order);
@@ -4473,6 +4677,10 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         return false;
       }
       if (selectedBranch != 'All' && order.branch.toLowerCase() != branch) {
+        return false;
+      }
+      if (selectedZone != null &&
+          state.areaZoneFor(order.areaEn) != selectedZone) {
         return false;
       }
       if (!matchesDateFilter(order)) return false;
@@ -4567,6 +4775,9 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     return role == Role.admin || role == Role.driverSupervisor;
   }
 
+  bool canAssignDriverFor(Order order) =>
+      canAssignDriver && (order.hasDriver || isReadyForDriverAssignment(order));
+
   bool get canChangeStatus {
     final role = state.role;
     return role == Role.admin ||
@@ -4587,13 +4798,37 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
 
   bool get canDeleteOrder => state.role == Role.admin;
 
-  List<Stage> get allowedStatusStages {
+  bool get canEditCustomer {
     final role = state.role;
-    if (role == Role.driver || role == Role.driverSupervisor) {
-      return [Stage.outForDelivery, Stage.delivered];
+    return role == Role.admin ||
+        role == Role.receptionistSupervisor ||
+        role == Role.driverSupervisor;
+  }
+
+  List<Stage> allowedStatusStages(Order order) {
+    final role = state.role;
+    if (role == Role.driver) {
+      return order.driverMission == 'delivery'
+          ? [Stage.outForDelivery, Stage.delivered]
+          : [Stage.outForDelivery, Stage.onShop];
+    }
+    if (role == Role.driverSupervisor) {
+      return [
+        Stage.outForDelivery,
+        Stage.onShop,
+        Stage.ready,
+        Stage.delivered,
+        if (order.stage == Stage.delivered) Stage.complete,
+      ];
     }
     if (role == Role.receptionist || role == Role.receptionistSupervisor) {
-      return [Stage.completed, Stage.onShop, Stage.ready];
+      return [
+        Stage.completed,
+        Stage.onShop,
+        Stage.ready,
+        Stage.delivered,
+        if (order.stage == Stage.delivered) Stage.complete,
+      ];
     }
     if (role == Role.tailor) {
       return [Stage.onShop, Stage.ready];
@@ -4604,6 +4839,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       Stage.ready,
       Stage.outForDelivery,
       Stage.delivered,
+      if (order.stage == Stage.delivered) Stage.complete,
     ];
   }
 
@@ -4637,6 +4873,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     await state.updateOrder(
       order.id,
       driver: driver,
+      driverMission: driverMissionForAssignment(order),
       timelineNote: 'Driver assigned to $driver from orders dashboard',
     );
     if (!mounted) return;
@@ -4646,8 +4883,169 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     ));
   }
 
+  Future<void> editCustomerFromTable(BuildContext context, Order order) async {
+    final customer = TextEditingController(text: order.customer);
+    final mobile = TextEditingController(text: order.mobile);
+    final address = TextEditingController(text: order.address);
+    final service = TextEditingController(text: order.service);
+    final preference = TextEditingController(text: order.preference);
+    var areaEn = order.areaEn;
+    final activeAreas = state.activeAreas;
+    if (!activeAreas.any((item) => item.en == areaEn)) {
+      activeAreas.insert(0, state.areaFromName(areaEn));
+    }
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(state.t('Edit customer information',
+              '\u062a\u0639\u062f\u064a\u0644 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0639\u0645\u064a\u0644')),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextField(
+                  controller: customer,
+                  decoration: InputDecoration(
+                      labelText: state.t('Customer name',
+                          '\u0627\u0633\u0645 \u0627\u0644\u0639\u0645\u064a\u0644')),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: mobile,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(8),
+                  ],
+                  decoration: InputDecoration(
+                      labelText: state.t('Mobile', '\u0627\u0644\u0647\u0627\u062a\u0641')),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: areaEn,
+                  decoration: InputDecoration(
+                      labelText: state.t('Area', '\u0627\u0644\u0645\u0646\u0637\u0642\u0629')),
+                  items: [
+                    for (final area in activeAreas)
+                      DropdownMenuItem(
+                        value: area.en,
+                        child: Text(area.name(state.isArabic)),
+                      ),
+                  ],
+                  onChanged: (value) =>
+                      setDialogState(() => areaEn = value ?? areaEn),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: address,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                      labelText: state.t('Address', '\u0627\u0644\u0639\u0646\u0648\u0627\u0646')),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: service,
+                  decoration: InputDecoration(
+                      labelText: state.t('Service', '\u0627\u0644\u062e\u062f\u0645\u0629')),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: preference,
+                  decoration: InputDecoration(
+                      labelText: state.t('Tailor type',
+                          '\u0646\u0648\u0639 \u0627\u0644\u062e\u064a\u0627\u0637')),
+                ),
+              ]),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(state.t('Cancel', '\u0625\u0644\u063a\u0627\u0621')),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final phone = mobile.text.trim();
+                if (customer.text.trim().isEmpty ||
+                    address.text.trim().isEmpty ||
+                    service.text.trim().isEmpty ||
+                    preference.text.trim().isEmpty ||
+                    !RegExp(r'^[4569]\d{7}$').hasMatch(phone)) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(
+                    content: Text(state.t(
+                      'Complete all fields and enter a valid 8-digit Kuwait number.',
+                      '\u0623\u0643\u0645\u0644 \u062c\u0645\u064a\u0639 \u0627\u0644\u062d\u0642\u0648\u0644 \u0648\u0623\u062f\u062e\u0644 \u0631\u0642\u0645\u0627\u064b \u0643\u0648\u064a\u062a\u064a\u0627\u064b \u0635\u062d\u064a\u062d\u0627\u064b \u0645\u0646 8 \u0623\u0631\u0642\u0627\u0645.',
+                    )),
+                  ));
+                  return;
+                }
+                Navigator.of(dialogContext).pop({
+                  'customer': customer.text.trim(),
+                  'mobile': phone,
+                  'areaEn': areaEn,
+                  'address': address.text.trim(),
+                  'service': service.text.trim(),
+                  'preference': preference.text.trim(),
+                });
+              },
+              child: Text(state.t('Review changes',
+                  '\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u062a\u0639\u062f\u064a\u0644\u0627\u062a')),
+            ),
+          ],
+        ),
+      ),
+    );
+    customer.dispose();
+    mobile.dispose();
+    address.dispose();
+    service.dispose();
+    preference.dispose();
+    if (result == null || !context.mounted) return;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      state: state,
+      title: state.t('Confirm customer changes',
+          '\u062a\u0623\u0643\u064a\u062f \u062a\u0639\u062f\u064a\u0644 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0639\u0645\u064a\u0644'),
+      message: state.t(
+        'Save the corrected information for ${order.id}?',
+        '\u0647\u0644 \u062a\u0631\u064a\u062f \u062d\u0641\u0638 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0645\u0635\u062d\u062d\u0629 \u0644\u0644\u0637\u0644\u0628 ${order.id}\u061f',
+      ),
+      confirmLabel: state.t('Yes, save',
+          '\u0646\u0639\u0645\u060c \u062d\u0641\u0638'),
+    );
+    if (!confirmed) return;
+    final selectedArea = state.areaFromName(result['areaEn']!);
+    await state.updateOrder(
+      order.id,
+      customer: result['customer'],
+      mobile: result['mobile'],
+      areaEn: selectedArea.en,
+      areaAr: selectedArea.ar,
+      address: result['address'],
+      service: result['service'],
+      preference: result['preference'],
+      timelineNote: 'Customer information corrected by ${state.currentStaffName}',
+    );
+  }
+
   Future<void> setStatusFromTable(
       BuildContext context, Order order, Stage stage) async {
+    if (stage == Stage.complete) {
+      final confirmed = await showConfirmActionDialog(
+        context,
+        state: state,
+        title: state.t('Complete order',
+            '\u0625\u0643\u0645\u0627\u0644 \u0627\u0644\u0637\u0644\u0628'),
+        message: state.t(
+          'Move ${order.id} to history after delivery?',
+          '\u0647\u0644 \u062a\u0631\u064a\u062f \u0646\u0642\u0644 ${order.id} \u0625\u0644\u0649 \u0627\u0644\u0633\u062c\u0644 \u0628\u0639\u062f \u0627\u0644\u062a\u0633\u0644\u064a\u0645\u061f',
+        ),
+        confirmLabel: state.t('Yes, complete',
+            '\u0646\u0639\u0645\u060c \u0625\u0643\u0645\u0627\u0644'),
+      );
+      if (!confirmed) return;
+    }
     final readyBy =
         stage == Stage.ready ? await showReadyByDialog(context, state) : null;
     if (stage == Stage.ready && readyBy == null) return;
@@ -4776,7 +5174,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
   }
 
   Widget statusMenu(Order order) {
-    final statusStages = allowedStatusStages;
+    final statusStages = allowedStatusStages(order);
     return PopupMenuButton<Stage>(
       tooltip: state.t('Change status', 'تغيير الحالة'),
       onSelected: (stage) => setStatusFromTable(context, order, stage),
@@ -4815,6 +5213,12 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         spacing: 8,
         runSpacing: 8,
         children: [
+          if (canEditCustomer)
+            compactTableButton(
+              label: state.t('Edit details',
+                  '\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a'),
+              onPressed: () => editCustomerFromTable(context, order),
+            ),
           compactTableButton(
             label: state.t('Branch', 'الفرع'),
             onPressed: isClosedOrder(order) || !canAssignBranch
@@ -4823,7 +5227,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           ),
           compactTableButton(
             label: state.t('Driver', 'السائق'),
-            onPressed: isClosedOrder(order) || !canAssignDriver
+            onPressed: isClosedOrder(order) || !canAssignDriverFor(order)
                 ? null
                 : () => assignDriverFromTable(context, order),
           ),
@@ -4843,7 +5247,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               label: state.t('Restore', '\u0625\u0631\u062c\u0627\u0639'),
               onPressed: () => restoreOrderFromTable(context, order),
             ),
-          if (allowedStatusStages.contains(Stage.delivered))
+          if (allowedStatusStages(order).contains(Stage.delivered))
             compactTableButton(
               label: state.t('Delivered', 'تم التسليم'),
               onPressed: isClosedOrder(order) || !canChangeStatus
@@ -4868,6 +5272,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     return PopupMenuButton<String>(
       tooltip: state.t('Actions', 'الإجراءات'),
       onSelected: (value) {
+        if (value == 'edit') editCustomerFromTable(context, order);
         if (value == 'branch') assignBranchFromTable(context, order);
         if (value == 'driver') assignDriverFromTable(context, order);
         if (value == 'reschedule') rescheduleOrderFromTable(context, order);
@@ -4881,18 +5286,24 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         }
       },
       itemBuilder: (context) => [
+        if (canEditCustomer)
+          PopupMenuItem(
+            value: 'edit',
+            child: Text(state.t('Edit customer details',
+                '\u062a\u0639\u062f\u064a\u0644 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0639\u0645\u064a\u0644')),
+          ),
         if (canAssignBranch && !isClosedOrder(order))
           PopupMenuItem(
             value: 'branch',
             child: Text(state.t('Assign branch', 'تعيين الفرع')),
           ),
-        if (canAssignDriver && !isClosedOrder(order))
+        if (canAssignDriverFor(order) && !isClosedOrder(order))
           PopupMenuItem(
             value: 'driver',
             child: Text(state.t('Assign driver', 'تعيين السائق')),
           ),
         if (canChangeStatus && !isClosedOrder(order))
-          for (final stage in allowedStatusStages)
+          for (final stage in allowedStatusStages(order))
             PopupMenuItem(
               value: 'stage:${stage.name}',
               child: Text(stageLabel(stage, state.isArabic)),
@@ -4958,6 +5369,21 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
     );
   }
 
+  Widget areaTag(Order order) {
+    final zone = state.areaZoneFor(order.areaEn);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: areaZoneColor(zone),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '${order.area(state.isArabic)}  ${state.t('Zone', '\u0645\u0646\u0637\u0642\u0629')} $zone',
+        style: const TextStyle(color: ink, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+
   Widget mobileOrderCard(BuildContext context, Order order,
       {bool highlighted = false, bool today = false}) {
     return Card(
@@ -4996,11 +5422,19 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
           detailLine(state.t('Visit', 'الزيارة'), order.window),
           detailLine(state.t('Customer', 'العميل'), order.customer),
           detailLine(state.t('Mobile', 'الهاتف'), order.mobile),
-          detailLine(state.t('Area', 'المنطقة'), order.area(state.isArabic)),
+          areaTag(order),
+          const SizedBox(height: 8),
+          detailLine(state.t('Address', '\u0627\u0644\u0639\u0646\u0648\u0627\u0646'), order.address),
           detailLine(state.t('Branch', 'الفرع'), order.branch),
           detailLine(state.t('Receptionist', 'الاستقبال'), order.receptionist),
           detailLine(state.t('Driver', 'السائق'), order.driver),
+          detailLine(state.t('Pickup driver',
+              '\u0633\u0627\u0626\u0642 \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645'), order.pickupDriver),
+          detailLine(state.t('Delivery driver',
+              '\u0633\u0627\u0626\u0642 \u0627\u0644\u062a\u0648\u0635\u064a\u0644'), order.deliveryDriver),
           detailLine(state.t('Service', 'الخدمة'), order.service),
+          detailLine(state.t('Tailor type',
+              '\u0646\u0648\u0639 \u0627\u0644\u062e\u064a\u0627\u0637'), order.preference),
           const SizedBox(height: 10),
           rowActions(context, order, width: double.infinity),
         ]),
@@ -5019,6 +5453,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
         ? [
             null,
             Stage.delivered,
+            Stage.complete,
             Stage.cancelled,
           ]
         : [
@@ -5028,6 +5463,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             Stage.onShop,
             Stage.ready,
             Stage.outForDelivery,
+            Stage.delivered,
             Stage.cancelled,
           ];
     return adminCard(
@@ -5095,6 +5531,40 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             ),
           ),
           SizedBox(
+            width: 150,
+            child: DropdownButtonFormField<int>(
+              value: selectedZone ?? 0,
+              decoration: InputDecoration(
+                  labelText: state.t('Area zone',
+                      '\u0644\u0648\u0646 \u0627\u0644\u0645\u0646\u0637\u0642\u0629')),
+              items: [
+                DropdownMenuItem(
+                  value: 0,
+                  child: Text(state.t('All zones',
+                      '\u0643\u0644 \u0627\u0644\u0623\u0644\u0648\u0627\u0646')),
+                ),
+                for (var zone = 1; zone <= 5; zone++)
+                  DropdownMenuItem(
+                    value: zone,
+                    child: Row(children: [
+                      Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: areaZoneColor(zone),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text('${state.t('Zone', '\u0645\u0646\u0637\u0642\u0629')} $zone'),
+                    ]),
+                  ),
+              ],
+              onChanged: (value) =>
+                  setState(() => selectedZone = value == 0 ? null : value),
+            ),
+          ),
+          SizedBox(
             width: 260,
             child: TextField(
               controller: search,
@@ -5107,6 +5577,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             onPressed: () {
               setState(() {
                 selectedStage = null;
+                selectedZone = null;
                 selectedBranch = 'All';
                 datePreset = 'nearest';
                 fromDate = null;
@@ -5183,13 +5654,20 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             ],
           )
         else
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
+          Scrollbar(
+            controller: tableScrollController,
+            thumbVisibility: true,
+            trackVisibility: true,
+            scrollbarOrientation: ScrollbarOrientation.bottom,
+            child: SingleChildScrollView(
+              controller: tableScrollController,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 14),
+              child: DataTable(
               dataRowMinHeight: 92,
               dataRowMaxHeight: 118,
               headingRowHeight: 58,
-              columnSpacing: 28,
+              columnSpacing: 12,
               columns: [
                 dataLabel('ID'),
                 dataLabel(state.t('Actions', 'الإجراءات')),
@@ -5197,8 +5675,11 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                 dataLabel(state.t('Customer', 'العميل')),
                 dataLabel(state.t('Mobile', 'الهاتف')),
                 dataLabel(state.t('Area', 'المنطقة')),
+                dataLabel(state.t('Address', '\u0627\u0644\u0639\u0646\u0648\u0627\u0646')),
                 dataLabel(state.t('Branch', 'الفرع')),
                 dataLabel(state.t('Services', 'الخدمات')),
+                dataLabel(state.t('Tailor type',
+                    '\u0646\u0648\u0639 \u0627\u0644\u062e\u064a\u0627\u0637')),
                 dataLabel(state.t('Receptionist', 'الاستقبال')),
                 dataLabel(state.t('Driver', 'السائق')),
                 dataLabel(state.t('Status', 'الحالة')),
@@ -5216,7 +5697,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                       ),
                       cells: [
                         textCell(order.id,
-                            width: 96,
+                            width: 78,
                             maxLines: 1,
                             color: isTodayVisit(order) ||
                                     order.id == nearestActiveId ||
@@ -5230,7 +5711,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                                 : null),
                         DataCell(desktopActionMenu(context, order)),
                         textCell(order.window,
-                            width: 220,
+                            width: 180,
                             color: isTodayVisit(order) ||
                                     order.id == nearestActiveId ||
                                     order.stage == Stage.cancelled
@@ -5241,13 +5722,15 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                                     order.stage == Stage.cancelled
                                 ? FontWeight.w800
                                 : null),
-                        textCell(order.customer, width: 170),
-                        textCell(order.mobile, width: 120, maxLines: 1),
-                        textCell(order.area(state.isArabic), width: 190),
-                        textCell(order.branch, width: 210),
-                        textCell(order.service, width: 160),
-                        textCell(order.receptionist, width: 190),
-                        textCell(order.driver, width: 150),
+                        textCell(order.customer, width: 130),
+                        textCell(order.mobile, width: 96, maxLines: 1),
+                        DataCell(areaTag(order)),
+                        textCell(order.address, width: 190, maxLines: 3),
+                        textCell(order.branch, width: 150),
+                        textCell(order.service, width: 120),
+                        textCell(order.preference, width: 110),
+                        textCell(order.receptionist, width: 150),
+                        textCell(order.driver, width: 120),
                         DataCell(badge(stageLabel(order.stage, state.isArabic),
                             stageColor(order.stage))),
                         DataCell(badge(
@@ -5259,6 +5742,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
                                 : gold)),
                       ]),
               ],
+              ),
             ),
           ),
         if (shown.length > 120) ...[
@@ -5368,14 +5852,18 @@ class DriverAssignmentCard extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           if (driverQueue.isEmpty)
-            Text(state.t('No ready orders waiting for a driver.',
-                'No ready orders waiting for a driver.')),
+            Text(state.t('No pickup or delivery orders are waiting for a driver.',
+                '\u0644\u0627 \u062a\u0648\u062c\u062f \u0637\u0644\u0628\u0627\u062a \u0627\u0633\u062a\u0644\u0627\u0645 \u0623\u0648 \u062a\u0648\u0635\u064a\u0644 \u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0633\u0627\u0626\u0642.')),
           for (final order in driverQueue)
             workflowOrderCard(context, state, order, actions: [
               ElevatedButton.icon(
                 onPressed: () => _assignDriver(context, order),
                 icon: const Icon(Icons.local_shipping),
-                label: Text(state.t('Assign driver', 'Assign driver')),
+                label: Text(needsDeliveryDriver(order)
+                    ? state.t('Assign delivery driver',
+                        '\u062a\u0639\u064a\u064a\u0646 \u0633\u0627\u0626\u0642 \u0627\u0644\u062a\u0648\u0635\u064a\u0644')
+                    : state.t('Assign pickup driver',
+                        '\u062a\u0639\u064a\u064a\u0646 \u0633\u0627\u0626\u0642 \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645')),
               ),
             ]),
         ]),
@@ -5396,7 +5884,9 @@ class DriverAssignmentCard extends StatelessWidget {
     await state.updateOrder(
       order.id,
       driver: driver,
-      timelineNote: 'Driver assigned to $driver',
+      driverMission: driverMissionForAssignment(order),
+      timelineNote:
+          '${driverMissionForAssignment(order)} driver assigned to $driver',
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -5488,27 +5978,55 @@ class DriverOperationsPanel extends StatelessWidget {
                 icon: const Icon(Icons.map_outlined),
                 label: const Text('Google Maps'),
               ),
-              if (order.stage != Stage.outForDelivery && !isClosedOrder(order))
-                ElevatedButton.icon(
-                  onPressed: () => _setStage(
-                      context,
-                      order,
-                      Stage.outForDelivery,
-                      'Driver marked order out for delivery'),
-                  icon: const Icon(Icons.route),
-                  label: Text(state.t('Out for Delivery', 'خارج للتوصيل')),
-                ),
-              if (!isClosedOrder(order))
-                ElevatedButton.icon(
-                  onPressed: () => _setStage(context, order, Stage.delivered,
-                      'Driver marked order delivered'),
-                  icon: const Icon(Icons.done_all),
-                  label: Text(state.t('Delivered', 'تم التسليم')),
-                ),
+              ..._missionActions(context, order),
             ]),
         ]),
       ),
     );
+  }
+
+  List<Widget> _missionActions(BuildContext context, Order order) {
+    final pickupMission = order.driverMission == 'pickup' ||
+        (order.driverMission.isEmpty &&
+            isPendingAssignment(order.deliveryDriver));
+    if (pickupMission) {
+      return [
+        if (order.stage != Stage.outForDelivery)
+          ElevatedButton.icon(
+            onPressed: () => _setStage(context, order, Stage.outForDelivery,
+                'Pickup driver is on the way to the customer'),
+            icon: const Icon(Icons.route),
+            label: Text(state.t('On way to customer',
+                '\u0641\u064a \u0627\u0644\u0637\u0631\u064a\u0642 \u0644\u0644\u0639\u0645\u064a\u0644')),
+          ),
+        ElevatedButton.icon(
+          onPressed: () => _setStage(context, order, Stage.onShop,
+              'Pickup driver delivered the order to the shop'),
+          icon: const Icon(Icons.storefront),
+          label: Text(state.t('Arrived at shop',
+              '\u0648\u0635\u0644 \u0625\u0644\u0649 \u0627\u0644\u0645\u062d\u0644')),
+        ),
+      ];
+    }
+    return [
+      if (order.stage != Stage.outForDelivery &&
+          order.stage != Stage.delivered)
+        ElevatedButton.icon(
+          onPressed: () => _setStage(context, order, Stage.outForDelivery,
+              'Delivery driver marked order out for delivery'),
+          icon: const Icon(Icons.route),
+          label: Text(state.t('Out for Delivery',
+              '\u062e\u0627\u0631\u062c \u0644\u0644\u062a\u0648\u0635\u064a\u0644')),
+        ),
+      if (order.stage != Stage.delivered)
+        ElevatedButton.icon(
+          onPressed: () => _setStage(context, order, Stage.delivered,
+              'Delivery driver marked order delivered'),
+          icon: const Icon(Icons.done_all),
+          label: Text(state.t(
+              'Delivered', '\u062a\u0645 \u0627\u0644\u062a\u0633\u0644\u064a\u0645')),
+        ),
+    ];
   }
 
   Future<void> _copyTracking(BuildContext context, Order order) async {
@@ -5703,7 +6221,9 @@ class DriverSupervisorDashboard extends StatelessWidget {
     await state.updateOrder(
       order.id,
       driver: driver,
-      timelineNote: 'Driver assigned to $driver',
+      driverMission: driverMissionForAssignment(order),
+      timelineNote:
+          '${driverMissionForAssignment(order)} driver assigned to $driver',
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -5859,6 +6379,12 @@ Widget workflowOrderCard(BuildContext context, AppState state, Order order,
             label: Text(
                 '${state.t('Receptionist', 'الاستقبال')}: ${order.receptionist}')),
         Chip(label: Text('${state.t('Driver', 'السائق')}: ${order.driver}')),
+        Chip(
+            label: Text('${state.t('Pickup driver', '\u0633\u0627\u0626\u0642 \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645')}: ${order.pickupDriver}')),
+        Chip(
+            label: Text('${state.t('Delivery driver', '\u0633\u0627\u0626\u0642 \u0627\u0644\u062a\u0648\u0635\u064a\u0644')}: ${order.deliveryDriver}')),
+        Chip(
+            label: Text('${state.t('Tailor type', '\u0646\u0648\u0639 \u0627\u0644\u062e\u064a\u0627\u0637')}: ${order.preference}')),
       ]),
       const SizedBox(height: 10),
       OutlinedButton.icon(
@@ -6391,6 +6917,7 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
               columnSpacing: 38,
               columns: [
                 dataLabel(state.t('Area', 'المنطقة')),
+                dataLabel(state.t('Zone', '\u0645\u0646\u0637\u0642\u0629')),
                 dataLabel(state.t('Price', 'السعر')),
                 dataLabel(state.t('Status', 'الحالة')),
                 dataLabel(state.t('Action', 'الإجراء')),
@@ -6408,7 +6935,23 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
   DataRow _areaRow(BuildContext context, DeliveryAreaPrice price) {
     final area = state.areaFromName(price.areaEn);
     return DataRow(cells: [
-      DataCell(Text(area.name(state.isArabic))),
+      DataCell(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: areaZoneColor(price.zone),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(area.name(state.isArabic)),
+      )),
+      DataCell(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: areaZoneColor(price.zone),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text('${state.t('Zone', '\u0645\u0646\u0637\u0642\u0629')} ${price.zone}',
+            style: const TextStyle(color: ink, fontWeight: FontWeight.w700)),
+      )),
       DataCell(Text(formatKwd(price.price))),
       DataCell(badge(
           price.active
@@ -6440,6 +6983,7 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
     final controller =
         TextEditingController(text: area.price.toStringAsFixed(3));
     var active = area.active;
+    var zone = area.zone;
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -6461,6 +7005,33 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
                     const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                     labelText: state.t('Price KWD', 'السعر بالدينار')),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int>(
+                value: zone,
+                decoration: InputDecoration(
+                    labelText: state.t('Area zone',
+                        '\u0644\u0648\u0646 \u0627\u0644\u0645\u0646\u0637\u0642\u0629')),
+                items: [
+                  for (var item = 1; item <= 5; item++)
+                    DropdownMenuItem(
+                      value: item,
+                      child: Row(children: [
+                        Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: areaZoneColor(item),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('${state.t('Zone', '\u0645\u0646\u0637\u0642\u0629')} $item'),
+                      ]),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setDialogState(() => zone = value ?? zone),
               ),
               const SizedBox(height: 10),
               SwitchListTile(
@@ -6503,7 +7074,7 @@ class _AreaPricesPanelState extends State<AreaPricesPanel> {
       return;
     }
     await state.updateAreaPrice(area.areaEn, value, active,
-        newAreaEn: nextName);
+        newAreaEn: nextName, zone: zone);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content:
@@ -6885,6 +7456,443 @@ class BranchReceptionistsPanel extends StatelessWidget {
   }
 }
 
+class OrderStatusRecord {
+  const OrderStatusRecord(this.order, this.entry);
+  final Order order;
+  final StatusHistoryEntry entry;
+}
+
+class OrderRecordsPanel extends StatefulWidget {
+  const OrderRecordsPanel({super.key, required this.state});
+  final AppState state;
+
+  @override
+  State<OrderRecordsPanel> createState() => _OrderRecordsPanelState();
+}
+
+class _OrderRecordsPanelState extends State<OrderRecordsPanel> {
+  final search = TextEditingController();
+
+  AppState get state => widget.state;
+
+  @override
+  void initState() {
+    super.initState();
+    search.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  List<OrderStatusRecord> get records {
+    final query = search.text.trim().toLowerCase();
+    final result = <OrderStatusRecord>[];
+    for (final order in state.orders) {
+      for (final entry in order.statusHistory) {
+        final record = OrderStatusRecord(order, entry);
+        final haystack = '${order.id} ${order.customer} ${entry.changedBy} '
+                '${entry.fromStage} ${entry.toStage} ${entry.note}'
+            .toLowerCase();
+        if (query.isEmpty || haystack.contains(query)) result.add(record);
+      }
+    }
+    result.sort((a, b) => b.entry.timestamp.compareTo(a.entry.timestamp));
+    return result;
+  }
+
+  bool canUndo(OrderStatusRecord record) {
+    final history = record.order.statusHistory;
+    return history.isNotEmpty &&
+        history.last.id == record.entry.id &&
+        record.order.stage == stageFromKey(record.entry.toStage);
+  }
+
+  Future<void> undo(BuildContext context, OrderStatusRecord record) async {
+    final confirmed = await showConfirmActionDialog(
+      context,
+      state: state,
+      title: state.t('Undo status change',
+          '\u0627\u0644\u062a\u0631\u0627\u062c\u0639 \u0639\u0646 \u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u062d\u0627\u0644\u0629'),
+      message: state.t(
+        'Return ${record.order.id} from ${stageLabel(stageFromKey(record.entry.toStage), false)} to ${stageLabel(stageFromKey(record.entry.fromStage), false)}?',
+        '\u0625\u0631\u062c\u0627\u0639 ${record.order.id} \u0625\u0644\u0649 \u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0633\u0627\u0628\u0642\u0629\u061f',
+      ),
+      confirmLabel: state.t('Yes, undo',
+          '\u0646\u0639\u0645\u060c \u062a\u0631\u0627\u062c\u0639'),
+    );
+    if (!confirmed) return;
+    try {
+      await state.updateOrder(
+        record.order.id,
+        stage: stageFromKey(record.entry.fromStage),
+        driver: record.entry.fromDriver,
+        driverMission: record.entry.fromDriverMission,
+        timelineNote:
+            'Status change undone by ${state.currentStaffName}; restored from ${record.entry.toStage} to ${record.entry.fromStage}',
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = records;
+    return adminCard(
+      context,
+      title: state.t('Status records and undo',
+          '\u0633\u062c\u0644 \u0627\u0644\u062d\u0627\u0644\u0627\u062a \u0648\u0627\u0644\u062a\u0631\u0627\u062c\u0639'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          width: 320,
+          child: TextField(
+            controller: search,
+            decoration: InputDecoration(
+              labelText: state.t('Search records',
+                  '\u0628\u062d\u062b \u0641\u064a \u0627\u0644\u0633\u062c\u0644'),
+              suffixIcon: const Icon(Icons.search),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        if (shown.isEmpty)
+          Text(state.t(
+            'No structured status changes have been recorded yet.',
+            '\u0644\u0627 \u062a\u0648\u062c\u062f \u062a\u063a\u064a\u064a\u0631\u0627\u062a \u062d\u0627\u0644\u0629 \u0645\u0633\u062c\u0644\u0629 \u062d\u062a\u0649 \u0627\u0644\u0622\u0646.',
+          )),
+        for (final record in shown.take(200))
+          Card(
+            color: const Color(0xFFFFFCF6),
+            child: ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              title: Text(
+                '${record.order.id}  ${stageLabel(stageFromKey(record.entry.fromStage), state.isArabic)} -> ${stageLabel(stageFromKey(record.entry.toStage), state.isArabic)}',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                '${record.order.customer}\n${record.entry.timestamp}  •  ${record.entry.changedBy}${record.entry.note.isEmpty ? '' : '\n${record.entry.note}'}',
+              ),
+              isThreeLine: true,
+              trailing: OutlinedButton.icon(
+                onPressed:
+                    canUndo(record) ? () => undo(context, record) : null,
+                icon: const Icon(Icons.undo),
+                label: Text(state.t('Undo', '\u062a\u0631\u0627\u062c\u0639')),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+}
+
+class StaffAnalyticsPanel extends StatefulWidget {
+  const StaffAnalyticsPanel({super.key, required this.state});
+  final AppState state;
+
+  @override
+  State<StaffAnalyticsPanel> createState() => _StaffAnalyticsPanelState();
+}
+
+class _StaffAnalyticsPanelState extends State<StaffAnalyticsPanel> {
+  String roleFilter = 'all';
+  String dateFilter = 'all';
+  DateTime? fromDate;
+  DateTime? toDate;
+
+  AppState get state => widget.state;
+
+  bool matchesDate(Order order) {
+    final visit = visitSortDate(order);
+    final today = DateTime.now();
+    final day = DateTime(today.year, today.month, today.day);
+    if (dateFilter == 'today') {
+      return visit.year == day.year &&
+          visit.month == day.month &&
+          visit.day == day.day;
+    }
+    if (dateFilter == 'week') {
+      final start = day.subtract(Duration(days: day.weekday % 7));
+      final end = start.add(const Duration(days: 7));
+      return !visit.isBefore(start) && visit.isBefore(end);
+    }
+    if (dateFilter == 'custom') {
+      final start = fromDate == null
+          ? DateTime(2000)
+          : DateTime(fromDate!.year, fromDate!.month, fromDate!.day);
+      final end = toDate == null
+          ? DateTime(2100)
+          : DateTime(toDate!.year, toDate!.month, toDate!.day, 23, 59, 59);
+      return !visit.isBefore(start) && !visit.isAfter(end);
+    }
+    return true;
+  }
+
+  Future<void> pickDate(bool from) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: from
+          ? (fromDate ?? DateTime.now())
+          : (toDate ?? fromDate ?? DateTime.now()),
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2035),
+    );
+    if (picked == null) return;
+    setState(() {
+      dateFilter = 'custom';
+      if (from) {
+        fromDate = picked;
+      } else {
+        toDate = picked;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final orders = state.orders
+        .where((order) => hasConfirmedPayment(order) && matchesDate(order))
+        .toList();
+    final users = state.staffUsers.where((user) {
+      if (!{Role.receptionist, Role.driver}.contains(user.role)) return false;
+      return roleFilter == 'all' || user.role.name == roleFilter;
+    }).toList()
+      ..sort((a, b) => a.displayName.compareTo(b.displayName));
+
+    return adminCard(
+      context,
+      title: state.t('Staff performance analysis',
+          '\u062a\u062d\u0644\u064a\u0644 \u0623\u062f\u0627\u0621 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 12, runSpacing: 12, children: [
+          SizedBox(
+            width: 190,
+            child: DropdownButtonFormField<String>(
+              value: roleFilter,
+              decoration: InputDecoration(
+                  labelText: state.t('Staff type',
+                      '\u0646\u0648\u0639 \u0627\u0644\u0645\u0648\u0638\u0641')),
+              items: [
+                DropdownMenuItem(
+                    value: 'all',
+                    child: Text(state.t('All staff',
+                        '\u0643\u0644 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646'))),
+                DropdownMenuItem(
+                    value: Role.receptionist.name,
+                    child: Text(roleLabel(Role.receptionist, state.isArabic))),
+                DropdownMenuItem(
+                    value: Role.driver.name,
+                    child: Text(roleLabel(Role.driver, state.isArabic))),
+              ],
+              onChanged: (value) =>
+                  setState(() => roleFilter = value ?? 'all'),
+            ),
+          ),
+          SizedBox(
+            width: 190,
+            child: DropdownButtonFormField<String>(
+              value: dateFilter,
+              decoration: InputDecoration(
+                  labelText: state.t('Period', '\u0627\u0644\u0641\u062a\u0631\u0629')),
+              items: [
+                DropdownMenuItem(
+                    value: 'all', child: Text(state.t('All time', '\u0627\u0644\u0643\u0644'))),
+                DropdownMenuItem(
+                    value: 'today', child: Text(state.t('Today', '\u0627\u0644\u064a\u0648\u0645'))),
+                DropdownMenuItem(
+                    value: 'week',
+                    child: Text(state.t('This week',
+                        '\u0647\u0630\u0627 \u0627\u0644\u0623\u0633\u0628\u0648\u0639'))),
+                DropdownMenuItem(
+                    value: 'custom',
+                    child: Text(state.t('From / To', '\u0645\u0646 / \u0625\u0644\u0649'))),
+              ],
+              onChanged: (value) =>
+                  setState(() => dateFilter = value ?? 'all'),
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => pickDate(true),
+            icon: const Icon(Icons.calendar_today),
+            label: Text(fromDate == null
+                ? state.t('From', '\u0645\u0646')
+                : formatVisitDate(fromDate!)),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => pickDate(false),
+            icon: const Icon(Icons.event),
+            label: Text(toDate == null
+                ? state.t('To', '\u0625\u0644\u0649')
+                : formatVisitDate(toDate!)),
+          ),
+        ]),
+        const SizedBox(height: 16),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: [
+              dataLabel(state.t('Staff', '\u0627\u0644\u0645\u0648\u0638\u0641')),
+              dataLabel(state.t('Role', '\u0627\u0644\u062f\u0648\u0631')),
+              dataLabel(state.t('Home services / pickups',
+                  '\u0627\u0644\u0632\u064a\u0627\u0631\u0627\u062a / \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645')),
+              dataLabel(state.t('Deliveries', '\u0627\u0644\u062a\u0648\u0635\u064a\u0644\u0627\u062a')),
+              dataLabel(state.t('Total', '\u0627\u0644\u0645\u062c\u0645\u0648\u0639')),
+            ],
+            rows: [
+              for (final user in users)
+                _analyticsRow(user, orders),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+
+  DataRow _analyticsRow(StaffUser user, List<Order> orders) {
+    final name = user.displayName.toLowerCase();
+    var homeOrPickup = 0;
+    var deliveries = 0;
+    if (user.role == Role.receptionist) {
+      homeOrPickup = orders
+          .where((order) => order.receptionist.toLowerCase() == name)
+          .length;
+    } else {
+      homeOrPickup = orders
+          .where((order) => order.pickupDriver.toLowerCase() == name)
+          .length;
+      deliveries = orders.where((order) {
+        if (order.deliveryDriver.toLowerCase() == name) return true;
+        return isPendingAssignment(order.deliveryDriver) &&
+            order.driver.toLowerCase() == name &&
+            stageRank(order.stage) >= stageRank(Stage.delivered);
+      }).length;
+    }
+    return DataRow(cells: [
+      DataCell(Text(user.displayName)),
+      DataCell(Text(roleLabel(user.role, state.isArabic))),
+      DataCell(Text('$homeOrPickup')),
+      DataCell(Text('$deliveries')),
+      DataCell(Text('${homeOrPickup + deliveries}',
+          style: const TextStyle(fontWeight: FontWeight.w800))),
+    ]);
+  }
+}
+
+enum SupervisorSection { orders, history, records, analytics }
+
+class SupervisorDashboardShell extends StatefulWidget {
+  const SupervisorDashboardShell(
+      {super.key, required this.state, required this.role});
+  final AppState state;
+  final Role role;
+
+  @override
+  State<SupervisorDashboardShell> createState() =>
+      _SupervisorDashboardShellState();
+}
+
+class _SupervisorDashboardShellState extends State<SupervisorDashboardShell> {
+  SupervisorSection section = SupervisorSection.orders;
+  AppState get state => widget.state;
+
+  @override
+  Widget build(BuildContext context) {
+    final isReception = widget.role == Role.receptionistSupervisor;
+    final active = state.orders
+        .where((order) => hasConfirmedPayment(order) && !isClosedOrder(order))
+        .length;
+    final waiting = state.orders
+        .where((order) => hasConfirmedPayment(order) &&
+            (isReception
+                ? !order.hasBranch
+                : isReadyForDriverAssignment(order)))
+        .length;
+    return Shell(
+      state: state,
+      role: widget.role,
+      title: state.t(
+        isReception
+            ? 'Reception supervisor dashboard.'
+            : 'Driver supervisor dashboard.',
+        isReception
+            ? '\u0644\u0648\u062d\u0629 \u0645\u0634\u0631\u0641 \u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644.'
+            : '\u0644\u0648\u062d\u0629 \u0645\u0634\u0631\u0641 \u0627\u0644\u0633\u0627\u0626\u0642\u064a\u0646.',
+      ),
+      subtitle: '',
+      body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 16, runSpacing: 16, children: [
+          metric(state.t('Waiting action',
+              '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0625\u062c\u0631\u0627\u0621'), '$waiting'),
+          metric(state.t('Active orders',
+              '\u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0627\u0644\u0646\u0634\u0637\u0629'), '$active'),
+          metric(state.t('Completed history',
+              '\u0627\u0644\u0633\u062c\u0644 \u0627\u0644\u0645\u0643\u062a\u0645\u0644'),
+              '${state.orders.where((order) => order.stage == Stage.complete).length}'),
+        ]),
+        const SizedBox(height: 18),
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          _nav(SupervisorSection.orders,
+              state.t('Orders', '\u0627\u0644\u0637\u0644\u0628\u0627\u062a')),
+          _nav(SupervisorSection.history,
+              state.t('History', '\u0627\u0644\u0633\u062c\u0644')),
+          if (isReception)
+            _nav(SupervisorSection.records,
+                state.t('Records / Undo', '\u0627\u0644\u0633\u062c\u0644 / \u062a\u0631\u0627\u062c\u0639')),
+          _nav(SupervisorSection.analytics,
+              state.t('Analysis', '\u0627\u0644\u062a\u062d\u0644\u064a\u0644')),
+        ]),
+        const SizedBox(height: 18),
+        if (section == SupervisorSection.orders) ...[
+          OrdersDashboardTable(
+            state: state,
+            orders: state.orders,
+            title: state.t('Supervisor order schedule',
+                '\u062c\u062f\u0648\u0644 \u0637\u0644\u0628\u0627\u062a \u0627\u0644\u0645\u0634\u0631\u0641'),
+          ),
+          const SizedBox(height: 18),
+          if (isReception) BranchAssignmentCard(state: state),
+          if (!isReception) DriverAssignmentCard(state: state),
+          const SizedBox(height: 18),
+          StaffUsersPanel(state: state),
+          if (isReception) ...[
+            const SizedBox(height: 18),
+            BranchReceptionistsPanel(state: state),
+          ],
+        ],
+        if (section == SupervisorSection.history)
+          OrdersDashboardTable(
+            state: state,
+            orders: state.orders,
+            title: state.t('Order history', '\u0633\u062c\u0644 \u0627\u0644\u0637\u0644\u0628\u0627\u062a'),
+            historyMode: true,
+          ),
+        if (section == SupervisorSection.records && isReception)
+          OrderRecordsPanel(state: state),
+        if (section == SupervisorSection.analytics)
+          StaffAnalyticsPanel(state: state),
+      ]),
+    );
+  }
+
+  Widget _nav(SupervisorSection target, String label) {
+    final selected = section == target;
+    return FilledButton.tonal(
+      style: FilledButton.styleFrom(
+        backgroundColor: selected ? maroon : const Color(0xFFFFF1CF),
+        foregroundColor: selected ? Colors.white : const Color(0xFF8A6726),
+      ),
+      onPressed: () => setState(() => section = target),
+      child: Text(label),
+    );
+  }
+}
+
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key, required this.state});
   final AppState state;
@@ -6897,6 +7905,8 @@ enum AdminSection {
   orders,
   assignments,
   history,
+  records,
+  analytics,
   users,
   prices,
   schedule,
@@ -7039,6 +8049,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
             title: s.t('History', 'السجل'),
             historyMode: true,
           ),
+        if (selectedSection == AdminSection.records)
+          OrderRecordsPanel(state: s),
+        if (selectedSection == AdminSection.analytics)
+          StaffAnalyticsPanel(state: s),
         if (selectedSection == AdminSection.prices) AreaPricesPanel(state: s),
         if (selectedSection == AdminSection.users) StaffUsersPanel(state: s),
         if (selectedSection == AdminSection.schedule)
@@ -7708,6 +8722,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       adminSectionButton(
           AdminSection.assignments, s.t('Driver assignment', 'تعيين السائق')),
       adminSectionButton(AdminSection.history, s.t('History', 'السجل')),
+      adminSectionButton(AdminSection.records,
+          s.t('Records / Undo', '\u0627\u0644\u0633\u062c\u0644 / \u062a\u0631\u0627\u062c\u0639')),
+      adminSectionButton(AdminSection.analytics,
+          s.t('Analysis', '\u0627\u0644\u062a\u062d\u0644\u064a\u0644')),
       adminSectionButton(AdminSection.users, s.t('Users', 'المستخدمون')),
       adminSectionButton(
           AdminSection.prices, s.t('Delivery prices', 'أسعار التوصيل')),
