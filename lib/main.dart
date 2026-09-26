@@ -40,6 +40,49 @@ enum Stage {
   cancelled
 }
 
+Set<Stage> statusPermissionsForRole(Role? role) => switch (role) {
+      Role.receptionist => const {
+          Stage.completed,
+          Stage.onShop,
+          Stage.ready,
+        },
+      Role.receptionistSupervisor => const {
+          Stage.newBooking,
+          Stage.completed,
+          Stage.onShop,
+          Stage.ready,
+        },
+      Role.driver => const {
+          Stage.completed,
+          Stage.outForDelivery,
+          Stage.delivered,
+        },
+      Role.driverSupervisor => const {
+          Stage.newBooking,
+          Stage.completed,
+          Stage.outForDelivery,
+          Stage.delivered,
+        },
+      Role.employee => const {Stage.newBooking},
+      Role.admin => const {
+          Stage.newBooking,
+          Stage.completed,
+          Stage.onShop,
+          Stage.ready,
+          Stage.outForDelivery,
+          Stage.delivered,
+        },
+      // Tailor is retained for existing production accounts and assignments.
+      Role.tailor => const {Stage.onShop, Stage.ready},
+      null => const {},
+    };
+
+bool roleCanCancelOrders(Role? role) =>
+    role == Role.admin || role == Role.employee;
+
+bool roleCanRescheduleOrders(Role? role) =>
+    role == Role.admin || role == Role.employee;
+
 const ordersStorageKey = 'tailor_express_orders_v1';
 const staffUsersStorageKey = 'tailor_express_staff_users_v1';
 const staffSessionStorageKey = 'tailor_express_staff_session_v1';
@@ -1507,6 +1550,17 @@ class AppState extends ChangeNotifier {
 
   String get currentStaffName => currentStaff?.displayName ?? user;
 
+  String get currentStaffAuditName {
+    final staff = currentStaff;
+    if (staff == null) return currentStaffName;
+    final displayName = staff.displayName.trim();
+    final username = staff.username.trim();
+    if (username.isEmpty || username.toLowerCase() == displayName.toLowerCase()) {
+      return displayName;
+    }
+    return '$displayName ($username)';
+  }
+
   Area areaFromName(String areaEn) {
     return kuwaitAreas.firstWhere(
       (area) => area.en.toLowerCase() == areaEn.trim().toLowerCase(),
@@ -2535,7 +2589,7 @@ class AppState extends ChangeNotifier {
           if (stage != null) 'stage': stage.name,
           if (paymentStatus != null) 'paymentStatus': paymentStatus,
           if (timelineNote != null) 'timelineNote': timelineNote,
-          'changedBy': currentStaffName,
+          'changedBy': currentStaffAuditName,
         }),
         requestHeaders: {
           'Accept': 'application/json',
@@ -4549,8 +4603,12 @@ class _RoleOrdersWorkspaceState extends State<RoleOrdersWorkspace> {
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
-    final shownOrders = ordersFor(section);
-    final title = switch (section) {
+    final availableSections = pagePermissionsForRole(widget.role);
+    final visibleSection = availableSections.contains(section)
+        ? section
+        : availableSections.first;
+    final shownOrders = ordersFor(visibleSection);
+    final title = switch (visibleSection) {
       OrdersTableMode.appointments => state.t(
           'Appointments', '\u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f'),
       OrdersTableMode.delivery => state.t('Home Service Delivery',
@@ -4559,32 +4617,36 @@ class _RoleOrdersWorkspaceState extends State<RoleOrdersWorkspace> {
     };
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 10, runSpacing: 10, children: [
-        _sectionButton(
-            OrdersTableMode.appointments,
-            state.t('Appointments',
-                '\u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f')),
-        _sectionButton(
-          OrdersTableMode.delivery,
-          state.t('Home Service Delivery',
-              '\u062a\u0648\u0635\u064a\u0644 \u0627\u0644\u062e\u062f\u0645\u0629 \u0627\u0644\u0645\u0646\u0632\u0644\u064a\u0629'),
-        ),
-        _sectionButton(OrdersTableMode.history,
-            state.t('History', '\u0627\u0644\u0633\u062c\u0644')),
+        if (availableSections.contains(OrdersTableMode.appointments))
+          _sectionButton(
+              OrdersTableMode.appointments,
+              state.t('Appointments',
+                  '\u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f')),
+        if (availableSections.contains(OrdersTableMode.delivery))
+          _sectionButton(
+            OrdersTableMode.delivery,
+            state.t('Home Service Delivery',
+                '\u062a\u0648\u0635\u064a\u0644 \u0627\u0644\u062e\u062f\u0645\u0629 \u0627\u0644\u0645\u0646\u0632\u0644\u064a\u0629'),
+          ),
+        if (availableSections.contains(OrdersTableMode.history))
+          _sectionButton(OrdersTableMode.history,
+              state.t('History', '\u0627\u0644\u0633\u062c\u0644')),
       ]),
       const SizedBox(height: 18),
       OrdersDashboardTable(
-        key: ValueKey('role-${widget.role.name}-${section.name}'),
+        key: ValueKey('role-${widget.role.name}-${visibleSection.name}'),
         state: state,
         orders: shownOrders,
         title: title,
-        mode: section,
+        mode: visibleSection,
       ),
-      if (widget.role == Role.driver && section != OrdersTableMode.history) ...[
+      if (widget.role == Role.driver &&
+          visibleSection != OrdersTableMode.history) ...[
         const SizedBox(height: 18),
         DriverOperationsPanel(
           state: state,
           orders: shownOrders.where((order) {
-            return section == OrdersTableMode.appointments
+            return visibleSection == OrdersTableMode.appointments
                 ? isAppointmentOrder(order)
                 : isHomeServiceDeliveryOrder(order);
           }).toList(),
@@ -4620,6 +4682,29 @@ List<String> customerProgressSteps(Order order, bool ar) {
 }
 
 enum OrdersTableMode { all, appointments, delivery, history }
+
+Set<OrdersTableMode> pagePermissionsForRole(Role role) => switch (role) {
+      Role.receptionist => const {OrdersTableMode.appointments},
+      Role.receptionistSupervisor ||
+      Role.driverSupervisor ||
+      Role.employee ||
+      Role.admin =>
+        const {
+          OrdersTableMode.appointments,
+          OrdersTableMode.delivery,
+          OrdersTableMode.history,
+        },
+      Role.driver => const {
+          OrdersTableMode.appointments,
+          OrdersTableMode.delivery,
+        },
+      // Keep the legacy tailor workspace available until its matrix is defined.
+      Role.tailor => const {
+          OrdersTableMode.appointments,
+          OrdersTableMode.delivery,
+          OrdersTableMode.history,
+        },
+    };
 
 Widget workflowNavLabel(String label, OrdersTableMode mode) {
   if (mode == OrdersTableMode.history) {
@@ -4846,11 +4931,11 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       widget.orders.where(tableIncludesOrder).toList();
 
   bool canRescheduleOrder(Order order) =>
-      canCancelOrReschedule &&
+      roleCanRescheduleOrders(state.role) &&
       (!isClosedOrder(order) || order.stage == Stage.cancelled);
 
   bool canCancelOrder(Order order) =>
-      canCancelOrReschedule && !isClosedOrder(order);
+      roleCanCancelOrders(state.role) && !isClosedOrder(order);
 
   Color? orderSurfaceColor(Order order,
       {required bool highlighted, required bool today}) {
@@ -4972,22 +5057,10 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
       canAssignDriver && (order.hasDriver || isReadyForDriverAssignment(order));
 
   bool get canChangeStatus {
-    final role = state.role;
-    return role == Role.admin ||
-        role == Role.employee ||
-        role == Role.receptionistSupervisor ||
-        role == Role.driverSupervisor ||
-        role == Role.receptionist ||
-        role == Role.driver ||
-        role == Role.tailor;
+    return statusPermissionsForRole(state.role).isNotEmpty;
   }
 
-  bool get canCancelOrReschedule {
-    final role = state.role;
-    return role == Role.admin ||
-        role == Role.employee ||
-        role == Role.receptionistSupervisor;
-  }
+  bool get canRestoreOrder => roleCanCancelOrders(state.role);
 
   bool get canDeleteOrder => state.role == Role.admin;
 
@@ -5000,25 +5073,25 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
 
   List<Stage> allowedStatusStages(Order order) {
     final role = state.role;
-    if (role == Role.driver) {
-      return order.driverMission == 'delivery'
-          ? [Stage.outForDelivery, Stage.delivered]
-          : [Stage.outForDelivery, Stage.completed];
-    }
-    if (role == Role.receptionist) {
-      return [
-        Stage.completed,
-        Stage.onShop,
-        Stage.ready,
-      ];
-    }
-    if (role == Role.tailor) {
-      return [Stage.onShop, Stage.ready];
-    }
-    if (isAppointmentOrder(order)) {
-      return [Stage.completed, Stage.onShop, Stage.ready];
-    }
-    return [Stage.outForDelivery, Stage.delivered];
+    final permitted = statusPermissionsForRole(role);
+    if (role == Role.admin) return permitted.toList();
+    final appointmentWorkflow = widget.mode == OrdersTableMode.appointments ||
+        (widget.mode == OrdersTableMode.all && isAppointmentOrder(order));
+    final workflowStages = appointmentWorkflow
+        ? const [
+            Stage.newBooking,
+            Stage.completed,
+            Stage.onShop,
+            Stage.ready,
+            Stage.outForDelivery,
+          ]
+        : const [
+            Stage.newBooking,
+            Stage.ready,
+            Stage.outForDelivery,
+            Stage.delivered,
+          ];
+    return workflowStages.where(permitted.contains).toList();
   }
 
   Future<void> assignBranchFromTable(BuildContext context, Order order) async {
@@ -5425,7 +5498,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
               label: state.t('Cancel', 'إلغاء'),
               onPressed: () => cancelOrderFromTable(context, order),
             ),
-          if (canCancelOrReschedule && order.stage == Stage.cancelled)
+          if (canRestoreOrder && order.stage == Stage.cancelled)
             compactTableButton(
               label: state.t('Restore', '\u0625\u0631\u062c\u0627\u0639'),
               onPressed: () => restoreOrderFromTable(context, order),
@@ -5501,7 +5574,7 @@ class _OrdersDashboardTableState extends State<OrdersDashboardTable> {
             value: 'cancel',
             child: Text(state.t('Cancel order', 'إلغاء الطلب')),
           ),
-        if (canCancelOrReschedule && order.stage == Stage.cancelled)
+        if (canRestoreOrder && order.stage == Stage.cancelled)
           PopupMenuItem(
             value: 'restore',
             child: Text(state.t('Restore order',
@@ -6465,23 +6538,25 @@ class ReceptionistOrdersWorkspace extends StatefulWidget {
 
 class _ReceptionistOrdersWorkspaceState
     extends State<ReceptionistOrdersWorkspace> {
-  OrdersTableMode section = OrdersTableMode.appointments;
-
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
-    final title = section == OrdersTableMode.appointments
-        ? state.t(
-            'Appointments', '\u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f')
-        : state.t('History', '\u0627\u0644\u0633\u062c\u0644');
+    const section = OrdersTableMode.appointments;
+    final title = state.t(
+        'Appointments', '\u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f');
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 10, runSpacing: 10, children: [
-        _sectionButton(
-            OrdersTableMode.appointments,
-            state.t('Appointments',
-                '\u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f')),
-        _sectionButton(OrdersTableMode.history,
-            state.t('History', '\u0627\u0644\u0633\u062c\u0644')),
+        FilledButton.tonal(
+          style: FilledButton.styleFrom(
+            backgroundColor: maroon,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () {},
+          child: workflowNavLabel(
+              state.t('Appointments',
+                  '\u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f'),
+              section),
+        ),
       ]),
       const SizedBox(height: 18),
       OrdersDashboardTable(
@@ -6494,18 +6569,6 @@ class _ReceptionistOrdersWorkspaceState
             section == OrdersTableMode.appointments,
       ),
     ]);
-  }
-
-  Widget _sectionButton(OrdersTableMode target, String label) {
-    final selected = section == target;
-    return FilledButton.tonal(
-      style: FilledButton.styleFrom(
-        backgroundColor: selected ? maroon : const Color(0xFFFFF1CF),
-        foregroundColor: selected ? Colors.white : const Color(0xFF8A6726),
-      ),
-      onPressed: () => setState(() => section = target),
-      child: workflowNavLabel(label, target),
-    );
   }
 }
 
@@ -7927,7 +7990,7 @@ class _OrderRecordsPanelState extends State<OrderRecordsPanel> {
               ),
               subtitle: Text(
                 '${record.entry.isAssignment ? '${assignmentSummary(record.entry)}\n' : ''}'
-                '${record.order.customer}\n${record.entry.timestamp}  •  ${record.entry.changedBy}${record.entry.note.isEmpty ? '' : '\n${record.entry.note}'}',
+                '${record.order.customer}\n${record.entry.timestamp}\n${state.t('Changed by', '\u062a\u0645 \u0627\u0644\u062a\u063a\u064a\u064a\u0631 \u0628\u0648\u0627\u0633\u0637\u0629')}: ${record.entry.changedBy}${record.entry.note.isEmpty ? '' : '\n${record.entry.note}'}',
               ),
               isThreeLine: true,
               trailing: OutlinedButton.icon(
