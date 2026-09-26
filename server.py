@@ -917,6 +917,11 @@ def notify_order_created(order: dict) -> None:
         roles={'admin', 'receptionistSupervisor'},
         order_id=order_id,
     )
+    send_staff_push(
+        f'New booking {order_id} is ready for driver assignment.',
+        roles={'driverSupervisor'},
+        order_id=order_id,
+    )
 
 
 def notify_order_changed(original: dict, order: dict) -> None:

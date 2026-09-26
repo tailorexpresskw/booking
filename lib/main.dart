@@ -234,10 +234,10 @@ String legacyCustomerStageLabel(Stage stage, bool ar) => switch (stage) {
     };
 
 bool needsPickupDriver(Order order) =>
-    order.hasBranch && !order.hasDriver && order.stage == Stage.newBooking;
+    !order.hasDriver && order.stage == Stage.newBooking;
 
 bool needsDeliveryDriver(Order order) =>
-    order.stage == Stage.ready && order.hasBranch && !order.hasDriver;
+    order.stage == Stage.ready && !order.hasDriver;
 
 bool isReadyForDriverAssignment(Order order) =>
     needsPickupDriver(order) || needsDeliveryDriver(order);
@@ -1946,6 +1946,12 @@ class AppState extends ChangeNotifier {
           messages.add(t('New booking ${order.id} needs branch assignment.',
               'حجز جديد ${order.id} يحتاج تعيين الفرع.'));
         }
+        if (role == Role.driverSupervisor &&
+            isReadyForDriverAssignment(order)) {
+          messages.add(t(
+              'New booking ${order.id} is ready for driver assignment.',
+              'الحجز الجديد ${order.id} جاهز لتعيين السائق.'));
+        }
         continue;
       }
 
@@ -2029,10 +2035,11 @@ class AppState extends ChangeNotifier {
             messages['${order.id}:branch'] = t(
                 'New booking ${order.id} needs branch assignment.',
                 'حجز جديد ${order.id} يحتاج تعيين الفرع.');
-          } else if (isReadyForDriverAssignment(order)) {
+          }
+          if (isReadyForDriverAssignment(order)) {
             messages['${order.id}:driver'] = t(
-                '${order.id} has a branch and needs driver follow-up.',
-                '${order.id} يحتاج متابعة السائق بعد تعيين الفرع.');
+                '${order.id} is ready for driver assignment.',
+                '${order.id} جاهز لتعيين السائق.');
           }
           break;
         case Role.receptionistSupervisor:
@@ -2045,8 +2052,8 @@ class AppState extends ChangeNotifier {
         case Role.driverSupervisor:
           if (isReadyForDriverAssignment(order)) {
             messages['${order.id}:driver'] = t(
-                '${order.id} was assigned to ${order.branch} and needs driver follow-up.',
-                '${order.id} تم تعيينه إلى ${order.branch} ويحتاج متابعة السائق.');
+                '${order.id} is ready for driver assignment.',
+                '${order.id} جاهز لتعيين السائق.');
           }
           break;
         case Role.receptionist:
