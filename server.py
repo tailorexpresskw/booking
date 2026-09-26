@@ -966,6 +966,12 @@ def notify_order_changed(original: dict, order: dict) -> None:
             roles={'admin', 'driverSupervisor'},
             order_id=order_id,
         )
+    if new_stage == 'completed' and new_stage != old_stage:
+        send_staff_push(
+            f'{order_id} was visited. Reception can move it to In Shop.',
+            roles={'admin', 'receptionistSupervisor'},
+            order_id=order_id,
+        )
     if new_stage == 'onShop' and new_stage != old_stage:
         send_staff_push(
             f'{order_id} arrived at the shop. The pickup driver was released.',
@@ -2140,7 +2146,12 @@ class TailorHandler(SimpleHTTPRequestHandler):
             and str(payload.get('driverMission', '')).strip().lower() == 'delivery'
             and new_driver != 'Pending assignment'
         )
-        if new_stage in {'onShop', 'tailoring'} or (
+        releases_pickup_driver = (
+            new_stage == 'completed'
+            and old_driver != 'Pending assignment'
+            and str(original.get('driverMission', '')).strip() != 'delivery'
+        )
+        if releases_pickup_driver or new_stage in {'onShop', 'tailoring'} or (
             new_stage == 'ready' and not assigning_delivery_driver
         ):
             if old_driver != 'Pending assignment' and str(original.get('driverMission', '')).strip() != 'delivery':
@@ -2190,6 +2201,7 @@ class TailorHandler(SimpleHTTPRequestHandler):
             status_history.append({
                 'id': secrets.token_hex(8),
                 'timestamp': datetime.now(KUWAIT_TZ).isoformat(),
+                'changeType': 'status',
                 'fromStage': old_stage,
                 'toStage': new_stage,
                 'changedBy': str(payload.get('changedBy', 'Staff')).strip() or 'Staff',
@@ -2198,6 +2210,46 @@ class TailorHandler(SimpleHTTPRequestHandler):
                 'toDriver': str(order.get('driver', 'Pending assignment')),
                 'fromDriverMission': str(original.get('driverMission', '')),
                 'toDriverMission': str(order.get('driverMission', '')),
+            })
+
+        assignment_request_fields = {
+            'branch',
+            'receptionist',
+            'driver',
+            'driverMission',
+            'tailor',
+        }
+        assignment_requested = any(
+            key in payload for key in assignment_request_fields
+        )
+        assignment_changed = assignment_requested and any(
+            str(original.get(key, 'Pending assignment')).strip()
+            != str(order.get(key, 'Pending assignment')).strip()
+            for key in {'branch', 'receptionist', 'driver', 'tailor'}
+        )
+        if assignment_changed:
+            status_history = order.setdefault('statusHistory', [])
+            if not isinstance(status_history, list):
+                status_history = []
+                order['statusHistory'] = status_history
+            status_history.append({
+                'id': secrets.token_hex(8),
+                'timestamp': datetime.now(KUWAIT_TZ).isoformat(),
+                'changeType': 'assignment',
+                'fromStage': old_stage,
+                'toStage': new_stage,
+                'changedBy': str(payload.get('changedBy', 'Staff')).strip() or 'Staff',
+                'note': note,
+                'fromBranch': str(original.get('branch', 'Pending assignment')),
+                'toBranch': str(order.get('branch', 'Pending assignment')),
+                'fromReceptionist': str(original.get('receptionist', 'Pending assignment')),
+                'toReceptionist': str(order.get('receptionist', 'Pending assignment')),
+                'fromDriver': old_driver,
+                'toDriver': str(order.get('driver', 'Pending assignment')),
+                'fromDriverMission': str(original.get('driverMission', '')),
+                'toDriverMission': str(order.get('driverMission', '')),
+                'fromTailor': str(original.get('tailor', 'Pending assignment')),
+                'toTailor': str(order.get('tailor', 'Pending assignment')),
             })
 
         save_orders(orders)
